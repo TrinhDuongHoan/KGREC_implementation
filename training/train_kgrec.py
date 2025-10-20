@@ -199,20 +199,31 @@ def train(args):
                 best_epoch = epoch
 
     # save metrics
-    metrics_df = [epoch_list]
-    metrics_cols = ['epoch_idx']
-    for k in Ks:
-        for m in ['precision', 'recall', 'ndcg']:
-            metrics_df.append(metrics_list[k][m])
-            metrics_cols.append('{}@{}'.format(m, k))
-    metrics_df = pd.DataFrame(metrics_df).transpose()
-    metrics_df.columns = metrics_cols
-    metrics_df.to_csv(args.save_dir + '/metrics.tsv', sep='\t', index=False)
+    metrics_records = []
+    for i, epoch in enumerate(epoch_list):
+        row = {"epoch_idx": epoch}
+        for k in Ks:
+            for m in ["precision", "recall", "ndcg"]:
+                if i < len(metrics_list[k][m]):
+                    row[f"{m}@{k}"] = metrics_list[k][m][i]
+        metrics_records.append(row)
 
-    # print best metrics
-    best_metrics = metrics_df.loc[metrics_df['epoch_idx'] == best_epoch].iloc[0].to_dict()
-    logging.info('Best CF Evaluation: Epoch {:04d} | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-        int(best_metrics['epoch_idx']), best_metrics['precision@{}'.format(k_min)], best_metrics['precision@{}'.format(k_max)], best_metrics['recall@{}'.format(k_min)], best_metrics['recall@{}'.format(k_max)], best_metrics['ndcg@{}'.format(k_min)], best_metrics['ndcg@{}'.format(k_max)]))
+    metrics_df = pd.DataFrame(metrics_records)
+    csv_path = os.path.join(args.save_dir, "metrics.csv")
+    metrics_df.to_csv(csv_path, index=False)
+
+    # --- In best metrics ---
+    best_metrics = metrics_df.loc[metrics_df["epoch_idx"] == best_epoch].iloc[0].to_dict()
+    logging.info(
+        "Best CF Evaluation: Epoch {:04d} | "
+        "Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]".format(
+            int(best_metrics["epoch_idx"]),
+            best_metrics[f"precision@{k_min}"], best_metrics[f"precision@{k_max}"],
+            best_metrics[f"recall@{k_min}"], best_metrics[f"recall@{k_max}"],
+            best_metrics[f"ndcg@{k_min}"], best_metrics[f"ndcg@{k_max}"]
+        )
+    )
+
 
 
 def predict(args):
