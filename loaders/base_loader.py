@@ -187,7 +187,7 @@ class DataLoaderBase(object):
         self.item_pre_embed = pretrain_data['item_embed']
 
         assert self.user_pre_embed.shape[0] == self.n_users
-        assert self.item_pre_embed.shape[0] == self.n_itemsh
+        assert self.item_pre_embed.shape[0] == self.n_items
         assert self.user_pre_embed.shape[1] == self.args.embed_dim
         assert self.item_pre_embed.shape[1] == self.args.embed_dim
 

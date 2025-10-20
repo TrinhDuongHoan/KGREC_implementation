@@ -1,8 +1,8 @@
 seed: 2025
 data_name: amazon-book
 data_dir: datasets/
-use_pretrain: 0
-pretrain_embedding_dir: datasets/pretrain/
+use_pretrain: 1
+pretrain_embedding_dir: datasets/
 pretrain_model_path: trained_model/model.pth
 save_dir : trained_model/krec/amazon-book/
 cf_batch_size: 1024

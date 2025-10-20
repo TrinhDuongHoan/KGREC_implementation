@@ -9,6 +9,7 @@ import logging
 
 import pandas as pd
 from tqdm import tqdm
+import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
@@ -108,6 +109,9 @@ def train(args):
     epoch_list = []
     metrics_list = {k: {'precision': [], 'recall': [], 'ndcg': []} for k in Ks}
 
+
+    training_loss = {'epoch': [], 'cf_loss': [], 'kg_loss': [], 'total_loss': []}
+
     for epoch in range(1, args.n_epoch + 1):
         time0 = time()
         model.train()
@@ -165,8 +169,12 @@ def train(args):
             if (iter % args.kg_print_every) == 0:
                 logging.info('KG Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_kg_batch, time() - time4, kg_batch_loss.item(), kg_total_loss / iter))
         logging.info('KG Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_kg_batch, time() - time3, kg_total_loss / n_kg_batch))
+        
+        training_loss['epoch'].append(epoch)
+        training_loss['cf_loss'].append(cf_total_loss/n_cf_batch)
+        training_loss['kg_loss'].append(kg_total_loss/n_kg_batch)
+        training_loss['total_loss'].append(cf_total_loss/n_cf_batch + kg_total_loss/n_kg_batch)
 
-    
         time5 = time()
         h_list = data.h_list.to(device)
         t_list = data.t_list.to(device)
@@ -198,6 +206,10 @@ def train(args):
                 logging.info('Save model on epoch {:04d}!'.format(epoch))
                 best_epoch = epoch
 
+    training_loss_df = pd.DataFrame(training_loss)
+    training_loss_path = os.path.join(args.save_dir, "training_loss.csv")
+    training_loss_df.to_csv(training_loss_path, index=False)
+
     # save metrics
     metrics_records = []
     for i, epoch in enumerate(epoch_list):
@@ -223,29 +235,6 @@ def train(args):
             best_metrics[f"ndcg@{k_min}"], best_metrics[f"ndcg@{k_max}"]
         )
     )
-
-
-
-def predict(args):
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    data = DataLoaderKGRec(args, logging)
-
-    # load model
-    model = KGRec(args, data.n_users, data.n_entities, data.n_relations)
-    model = load_model(model, args.pretrain_model_path)
-    model.to(device)
-
-    # predict
-    Ks = eval(args.Ks)
-    k_min = min(Ks)
-    k_max = max(Ks)
-
-    cf_scores, metrics_dict = evaluate(model, data, Ks, device)
-    np.save(args.save_dir + 'cf_scores.npy', cf_scores)
-    print('CF Evaluation: Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-        metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'], metrics_dict[k_max]['recall'], metrics_dict[k_min]['ndcg'], metrics_dict[k_max]['ndcg']))
 
 
 
