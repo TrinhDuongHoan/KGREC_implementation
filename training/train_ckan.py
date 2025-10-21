@@ -41,70 +41,71 @@ def tile_triple_set(ts, n):
         return outs
     return _tile_list(H, n), _tile_list(R, n), _tile_list(T, n)
 
-def evaluate(model, loader, Ks, device, item_chunk_size=1024):
-    test_batch_size = loader.test_batch_size
-    train_user_dict = loader.train_user_dict
-    test_user_dict = loader.test_user_dict
-
+def evaluate(model, loader, Ks, device, item_bs=4096, user_bs=512, eval_user_limit=None):
     model.eval()
+    train_user_dict = loader.train_user_dict
+    test_user_dict  = loader.test_user_dict
 
-    user_ids = list(test_user_dict.keys())
-    user_batches = [user_ids[i:i + test_batch_size] for i in range(0, len(user_ids), test_batch_size)]
-
+    # ----- 1) Precompute item embeddings -----
     n_items = loader.n_items
-    all_item_ids = torch.arange(n_items, dtype=torch.long, device=device)
+    all_items = torch.arange(n_items, dtype=torch.long, device=device)
+    item_embs = []
 
-    cf_scores_all_users = []
-    metric_names = ['precision', 'recall', 'ndcg']
-    metrics_dict = {k: {m: [] for m in metric_names} for k in Ks}
+    with torch.no_grad(), tqdm(total=(n_items+item_bs-1)//item_bs, desc="Build item embs") as pbar:
+        for s in range(0, n_items, item_bs):
+            e = min(s+item_bs, n_items)
+            items = all_items[s:e]
+            i_ts = loader.build_item_triple_set(items)
+            # user dummy: repeat 1 id, rồi tile triple-set tương ứng
+            dummy_u = torch.full((items.size(0),), loader.n_entities, dtype=torch.long, device=device)
+            u_ts = loader.build_user_triple_set(dummy_u[:1])              # [1,T] mỗi level
+            u_ts = tile_triple_set(u_ts, items.size(0))                   # [B,T]
+            embs = model.core._agg_embeddings(items, u_ts, i_ts)[1]       # lấy e_v
+            item_embs.append(embs.detach())
+            pbar.update(1)
+    item_embs = torch.cat(item_embs, dim=0)                               # [I, D_eff]
 
-    with tqdm(total=len(user_batches), desc='Evaluating Iteration') as pbar:
-        for ub in user_batches:
-            # compute score matrix for this batch: shape [len(ub), n_items]
-            batch_scores = []
-            for u in ub:
-                u_t = torch.tensor([u], dtype=torch.long, device=device)
-                # user triple set cho 1 user
-                u_ts = loader.build_user_triple_set(u_t)
+    # ----- 2) Precompute user embeddings -----
+    user_ids = list(test_user_dict.keys())
+    if eval_user_limit is not None:
+        user_ids = user_ids[:eval_user_limit]
 
-                scores_u = []
-                for i_start in range(0, n_items, item_chunk_size):
-                    i_end = min(i_start + item_chunk_size, n_items)
-                    items_chunk = all_item_ids[i_start:i_end]
-                    i_ts = loader.build_item_triple_set(items_chunk)
+    cf_scores_all = []
+    metric_names = ['precision','recall','ndcg']
+    metrics_dict = {k:{m:[] for m in metric_names} for k in Ks}
 
-                    u_rep = u_t.repeat(items_chunk.size(0))
-                    u_ts_rep = tile_triple_set(u_ts, items_chunk.size(0))
+    with torch.no_grad(), tqdm(total=(len(user_ids)+user_bs-1)//user_bs, desc="Scoring") as pbar:
+        for s in range(0, len(user_ids), user_bs):
+            e = min(s+user_bs, len(user_ids))
+            u_batch = torch.tensor(user_ids[s:e], dtype=torch.long, device=device)
 
-                    with torch.no_grad():
-                        s = model(u_rep, items_chunk, u_ts_rep, i_ts, mode='predict')  # [C]
-                    scores_u.append(s.detach().cpu())
+            # user triple-set và embedding
+            u_ts = loader.build_user_triple_set(u_batch)
+            e_u, _ = model.core._agg_embeddings(all_items[:1], u_ts, loader.build_item_triple_set(all_items[:1]))  # chỉ cần e_u
+            # điểm = e_u @ item_embs^T
+            scores = (e_u @ item_embs.t())                                  # [B, I]
 
-                scores_u = torch.cat(scores_u, dim=0)  # [n_items]
-                batch_scores.append(scores_u.unsqueeze(0))  # [1, n_items]
-
-            batch_scores = torch.cat(batch_scores, dim=0)  # [B, n_items]
-            batch_scores_cpu = batch_scores.cpu()
+            # metrics
             batch_metrics = calc_metrics_at_k(
-                batch_scores_cpu,
+                scores.cpu(),
                 train_user_dict,
                 test_user_dict,
-                np.array(ub, dtype=np.int64),
+                u_batch.cpu().numpy(),
                 np.arange(n_items, dtype=np.int64),
                 Ks
             )
-
-            cf_scores_all_users.append(batch_scores_cpu.numpy())
+            cf_scores_all.append(scores.cpu().numpy())
             for k in Ks:
                 for m in metric_names:
                     metrics_dict[k][m].append(batch_metrics[k][m])
             pbar.update(1)
 
-    cf_scores = np.concatenate(cf_scores_all_users, axis=0)
+    cf_scores = np.concatenate(cf_scores_all, axis=0)
     for k in Ks:
         for m in metric_names:
             metrics_dict[k][m] = np.concatenate(metrics_dict[k][m]).mean()
     return cf_scores, metrics_dict
+
 
 
 def train(args):
@@ -116,7 +117,7 @@ def train(args):
 
     # save_dir
     args.save_dir = (
-        f"trained_models/CKAN/{args.data_name}/"
+        f"trained_model/CKAN/{args.data_name}/"
         f"dim{args.embed_dim}_layers{args.n_layer}_{args.agg}_"
         f"lr{args.lr}_pretrain{args.use_pretrain}/"
     )
@@ -183,7 +184,8 @@ def train(args):
             optimizer.step()
             optimizer.zero_grad()
             cf_total_loss += float(loss.detach().cpu().numpy())
-            logging.info(f'CF Training: Epoch {epoch:04d} Iter {it:04d}/{n_cf_batch:04d} Loss {loss:.4f}')
+            if (it % args.cf_print_every) == 0:
+                logging.info(f'CF Training: Epoch {epoch:04d} Iter {it:04d}/{n_cf_batch:04d} Loss {loss:.4f}')
 
         cf_mean = cf_total_loss / n_cf_batch
         logging.info(f'CF Training: Epoch {epoch:04d} | Total Iter {n_cf_batch} | Mean Loss {cf_mean:.4f}')
