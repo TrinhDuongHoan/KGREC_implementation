@@ -1,0 +1,25 @@
+seed: 2025
+
+data_name: last-fm
+data_dir: datasets/
+
+use_pretrain: 1
+pretrain_embedding_dir: datasets/
+pretrain_model_path: trained_models/model.pth
+
+embed_dim: 64
+n_layer: 3
+agg: concat          
+n_neighbor: 16
+cf_batch_size: 2048
+test_batch_size: 10000
+lr: 0.002
+n_epoch: 50
+stopping_steps: 10
+evaluate_every: 5
+cf_l2loss_lambda: 1e-5
+laplacian_type: random-walk
+
+Ks: [20, 40, 60, 80, 100]
+
+save_dir: trained_models/CKAN/last-fm/
