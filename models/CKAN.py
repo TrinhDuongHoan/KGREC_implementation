@@ -31,7 +31,7 @@ class CKANCore(nn.Module):
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_uniform_(layer.weight)
 
-    @torch.no_grad()
+    
     def _agg_embeddings(self, items, user_triple_set, item_triple_set):
         # user
         user_embeddings = []
