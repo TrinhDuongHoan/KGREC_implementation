@@ -14,7 +14,7 @@ n_neighbor: 8
 cf_batch_size: 2048
 test_batch_size: 10000
 lr: 0.002
-n_epoch: 1
+n_epoch: 50
 stopping_steps: 10
 evaluate_every: 1
 cf_l2loss_lambda: 1e-5
