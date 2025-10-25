@@ -135,11 +135,8 @@ def train(args):
         training_loss['kg_loss'].append(0.0)
         training_loss['total_loss'].append(cf_mean)
 
-        # update_att noop
-        model(torch.LongTensor([]).to(device),
-              torch.LongTensor([]).to(device),
-              torch.LongTensor([]).to(device),
-              [], mode='update_att')
+        # updatemode=_att noop
+        model(None, None, mode='update_att')
 
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
             time6 = time()
