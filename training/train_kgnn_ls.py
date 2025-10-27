@@ -30,44 +30,45 @@ def ls_schedule(epoch):
     return 0.1
 
 @torch.no_grad()
-def evaluate(model, dataloader, Ks, device):
-    model.eval()
-    # build cache cho toàn bộ item đánh giá
-    model.build_item_cache(device, n_items=dataloader.n_items, chunk=4096)
+def evaluate(model, loader, Ks, device, user_bs=256, item_chunk=4096, use_fp16=True):
+    train_user_dict = loader.train_user_dict
+    test_user_dict  = loader.test_user_dict
 
-    user_ids = list(dataloader.test_user_dict.keys())
-    user_ids_batches = [torch.LongTensor(user_ids[i:i + dataloader.test_batch_size]) 
-                        for i in range(0, len(user_ids), dataloader.test_batch_size)]
+    # precompute item cache  (1 lần)
+    model.build_item_cache(device, n_items=loader.n_items, chunk=item_chunk)
 
-    item_ids = torch.arange(dataloader.n_items, dtype=torch.long, device=device)
-    cf_scores = []
+    user_ids = list(test_user_dict.keys())
     metric_names = ['precision', 'recall', 'ndcg']
     metrics_dict = {k: {m: [] for m in metric_names} for k in Ks}
 
-    with tqdm(total=len(user_ids_batches), desc='Evaluating Iteration') as pbar:
-        for batch_user_ids in user_ids_batches:
-            batch_user_ids = batch_user_ids.to(device)
-            batch_scores = model(batch_user_ids, item_ids, mode='predict', use_cache=True)  # [U,I]
-            batch_scores = batch_scores.cpu()
-            batch_metrics = calc_metrics_at_k(
-                batch_scores,
-                dataloader.train_user_dict,
-                dataloader.test_user_dict,
-                batch_user_ids.cpu().numpy(),
-                item_ids.cpu().numpy(),
-                Ks
-            )
-            cf_scores.append(batch_scores.numpy())
-            for k in Ks:
-                for m in metric_names:
-                    metrics_dict[k][m].append(batch_metrics[k][m])
-            pbar.update(1)
+    for s in range(0, len(user_ids), user_bs):
+        e = min(s + user_bs, len(user_ids))
+        u_batch = torch.tensor(user_ids[s:e], dtype=torch.long, device=device)
 
-    cf_scores = np.concatenate(cf_scores, axis=0)
+        scores = model.predict_from_cache(u_batch)          # [B, I], float32
+        if use_fp16:
+            scores = scores.half()                          # giảm 1/2 RAM
+        # chuyển sang numpy theo batch, KHÔNG tích lũy cf_scores
+        batch_metrics = calc_metrics_at_k(
+            scores.cpu(),
+            train_user_dict, test_user_dict,
+            u_batch.cpu().numpy(),
+            np.arange(loader.n_items, dtype=np.int64),
+            Ks
+        )
+        for k in Ks:
+            for m in metric_names:
+                metrics_dict[k][m].append(batch_metrics[k][m])
+
+        del scores  # giải phóng
+
+    # gộp trung bình
     for k in Ks:
         for m in metric_names:
             metrics_dict[k][m] = np.concatenate(metrics_dict[k][m]).mean()
-    return cf_scores, metrics_dict
+
+    return None, metrics_dict  # không trả cf_scores để tiết kiệm RAM
+
 
 def train(args):
     # seed
@@ -86,12 +87,17 @@ def train(args):
     model = KGNN_LS_Torch(
         args,
         n_user=data.n_users,
-        n_entity=data.n_entities,
+        n_entity=data.n_entities,          # items + entities khác
         n_relation=data.n_relations,
-        adj_entity=data.adj_entity,
+        adj_entity=data.adj_entity,        # shape [n_entity, K^1 + ...] như bạn đang dùng
         adj_relation=data.adj_relation,
-        user_pos_items=data.user_pos_items,
+        user_pos_items=data.train_user_dict,  # dict u -> LongTensor(items)
+        n_items=data.n_items,             
+        user_pre_embed=(data.user_pre_embed if args.use_pretrain else None),
+        item_pre_embed=(data.item_pre_embed if args.use_pretrain else None),
+        use_pretrain=args.use_pretrain,
     ).to(device)
+
     logging.info(model)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
