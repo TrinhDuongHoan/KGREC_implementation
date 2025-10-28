@@ -2,6 +2,8 @@ import os
 import sys
 import random
 from time import time
+import time as ttime
+import psutil
 import yaml
 import argparse
 import logging
@@ -112,6 +114,15 @@ def train(args):
 
     training_loss = {'epoch': [], 'cf_loss': [], 'kg_loss': [], 'total_loss': []}
 
+    os.makedirs(args.save_dir, exist_ok=True)
+    training_stats_path = os.path.join(args.save_dir, "runtime_memory.csv")
+    if not os.path.exists(training_stats_path):
+        with open(training_stats_path, "w", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["epoch","iter","phase","wall_time_s","step_time_s","gpu_mem_MB","cpu_mem_MB","batch_size"])
+
+    warm_up_iters = 3
+
     for epoch in range(1, args.n_epoch + 1):
         time0 = time()
         model.train()
@@ -122,10 +133,18 @@ def train(args):
 
         for iter in range(1, n_cf_batch + 1):
             time2 = time()
+
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+
+            iter_wall_start = ttime.perf_counter()
+
             cf_batch_user, cf_batch_pos_item, cf_batch_neg_item = data.generate_cf_batch(data.train_user_dict, data.cf_batch_size)
             cf_batch_user = cf_batch_user.to(device)
             cf_batch_pos_item = cf_batch_pos_item.to(device)
             cf_batch_neg_item = cf_batch_neg_item.to(device)
+
+            iter_start = ttime.perf_counter()
 
             cf_batch_loss = model(cf_batch_user, cf_batch_pos_item, cf_batch_neg_item, mode='train_cf')
 
@@ -138,6 +157,20 @@ def train(args):
             cf_optimizer.zero_grad()
             cf_total_loss += cf_batch_loss.item()
 
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            
+            iter_end = ttime.perf_counter()
+            step_time = iter_end - iter_start
+            wall_time = iter_end - iter_wall_start
+            gpu_mem = torch.cuda.max_memory_allocated() / 1024 / 1024 if torch.cuda.is_available() else 0.0
+            cpu_mem = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+
+            if iter > warm_up_iters:
+                with open(training_stats_path, "a", newline="") as fh:
+                    writer = csv.writer(fh)
+                    writer.writerow([epoch, iter, "cf_batch", round(wall_time,6), round(step_time,6), round(gpu_mem,2), round(cpu_mem,2), args.cf_batch_size])
+
             if (iter % args.cf_print_every) == 0:
                 logging.info('CF Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_cf_batch, time() - time2, cf_batch_loss.item(), cf_total_loss / iter))
         logging.info('CF Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_cf_batch, time() - time1, cf_total_loss / n_cf_batch))
@@ -149,11 +182,19 @@ def train(args):
 
         for iter in range(1, n_kg_batch + 1):
             time4 = time()
+
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+
+            iter_wall_start = ttime.perf_counter()
+
             kg_batch_head, kg_batch_relation, kg_batch_pos_tail, kg_batch_neg_tail = data.generate_kg_batch(data.train_kg_dict, data.kg_batch_size, data.n_users_entities)
             kg_batch_head = kg_batch_head.to(device)
             kg_batch_relation = kg_batch_relation.to(device)
             kg_batch_pos_tail = kg_batch_pos_tail.to(device)
             kg_batch_neg_tail = kg_batch_neg_tail.to(device)
+
+            iter_start = ttime.perf_counter()
 
             kg_batch_loss = model(kg_batch_head, kg_batch_relation, kg_batch_pos_tail, kg_batch_neg_tail, mode='train_kg')
 
@@ -166,10 +207,30 @@ def train(args):
             kg_optimizer.zero_grad()
             kg_total_loss += kg_batch_loss.item()
 
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            
+            iter_end = ttime.perf_counter()
+            step_time = iter_end - iter_start
+            wall_time = iter_end - iter_wall_start
+            gpu_mem = torch.cuda.max_memory_allocated() / 1024 / 1024 if torch.cuda.is_available() else 0.0
+            cpu_mem = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+
+            if iter > warm_up_iters:
+                with open(training_stats_path, "a", newline="") as fh:
+                    writer = csv.writer(fh)
+                    writer.writerow([epoch, iter, "kg_batch", round(wall_time,6), round(step_time,6), round(gpu_mem,2), round(cpu_mem,2), args.kg_batch_size])
+
             if (iter % args.kg_print_every) == 0:
                 logging.info('KG Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_kg_batch, time() - time4, kg_batch_loss.item(), kg_total_loss / iter))
         logging.info('KG Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_kg_batch, time() - time3, kg_total_loss / n_kg_batch))
         
+        epoch_end_time = ttime.perf_counter()
+
+        with open(training_stats_path, "a", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow([epoch, "-", "epoch_total", round(epoch_end_time - time0,6), "-", "-", "-", "-"])
+
         training_loss['epoch'].append(epoch)
         training_loss['cf_loss'].append(cf_total_loss/n_cf_batch)
         training_loss['kg_loss'].append(kg_total_loss/n_kg_batch)
