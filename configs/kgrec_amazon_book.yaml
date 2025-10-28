@@ -17,9 +17,9 @@ mess_dropout: '[0.1, 0.1, 0.1]'
 kg_l2loss_lambda: 0.00001
 cf_l2loss_lambda: 0.00001
 lr: 0.0001
-n_epoch: 1
+n_epoch: 50
 stopping_steps: 10
 cf_print_every: 10
 kg_print_every: 10
-evaluate_every: 1
+evaluate_every: 5
 Ks: '[20, 40, 60, 80, 100]'

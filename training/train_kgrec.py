@@ -228,10 +228,11 @@ def train(args):
     best_metrics = metrics_df.loc[metrics_df["epoch_idx"] == best_epoch].iloc[0].to_dict()
     logging.info(
         "Best CF Evaluation: Epoch {:04d} | "
-        "Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]".format(
+        "Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], F1 [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]".format(
             int(best_metrics["epoch_idx"]),
             best_metrics[f"precision@{k_min}"], best_metrics[f"precision@{k_max}"],
             best_metrics[f"recall@{k_min}"], best_metrics[f"recall@{k_max}"],
+            best_metrics[f"f1@{k_min}"], best_metrics[f"f1@{k_max}"],
             best_metrics[f"ndcg@{k_min}"], best_metrics[f"ndcg@{k_max}"]
         )
     )
