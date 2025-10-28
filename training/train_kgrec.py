@@ -276,7 +276,7 @@ def train(args):
     for i, epoch in enumerate(epoch_list):
         row = {"epoch_idx": epoch}
         for k in Ks:
-            for m in ["precision", "recall", "ndcg"]:
+            for m in ["precision", "recall", "f1", "ndcg"]:
                 if i < len(metrics_list[k][m]):
                     row[f"{m}@{k}"] = metrics_list[k][m][i]
         metrics_records.append(row)
