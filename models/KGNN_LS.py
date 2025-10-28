@@ -45,7 +45,7 @@ class LabelAggregator(nn.Module):
         return masks.float() * self_labels + (~masks).float() * neigh
 
 
-class KGNN_LS_Torch(nn.Module):
+class KGNN_LS(nn.Module):
     """
     Giữ nguyên kiến trúc. Thêm:
       - use_pretrain: nạp user_pre_embed và item_pre_embed (items ở đầu entity_emb).

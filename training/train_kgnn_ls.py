@@ -17,7 +17,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from models.KGNN_LS import KGNN_LS_Torch  
+from models.KGNN_LS import KGNN_LS  
 from loaders.kgnn_ls_loader import DataLoaderKGNNLS 
 
 from utils.log_helper import *
@@ -84,7 +84,7 @@ def train(args):
 
     data = DataLoaderKGNNLS(args, logging)
 
-    model = KGNN_LS_Torch(
+    model = KGNN_LS(
         args,
         n_user=data.n_users,
         n_entity=data.n_entities,          # items + entities khác

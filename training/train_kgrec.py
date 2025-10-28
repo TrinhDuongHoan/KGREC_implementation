@@ -42,7 +42,7 @@ def evaluate(model, dataloader, Ks, device):
     item_ids = torch.arange(n_items, dtype=torch.long).to(device)
 
     cf_scores = []
-    metric_names = ['precision', 'recall', 'ndcg']
+    metric_names = ['precision', 'recall', 'f1', 'ndcg']
     metrics_dict = {k: {m: [] for m in metric_names} for k in Ks}
 
     with tqdm(total=len(user_ids_batches), desc='Evaluating Iteration') as pbar:
@@ -61,11 +61,11 @@ def evaluate(model, dataloader, Ks, device):
                     metrics_dict[k][m].append(batch_metrics[k][m])
             pbar.update(1)
 
-    cf_scores = np.concatenate(cf_scores, axis=0)
+    # cf_scores = np.concatenate(cf_scores, axis=0)
     for k in Ks:
         for m in metric_names:
             metrics_dict[k][m] = np.concatenate(metrics_dict[k][m]).mean()
-    return cf_scores, metrics_dict
+    return metrics_dict
 
 
 def train(args):
@@ -107,7 +107,7 @@ def train(args):
     k_max = max(Ks)
 
     epoch_list = []
-    metrics_list = {k: {'precision': [], 'recall': [], 'ndcg': []} for k in Ks}
+    metrics_list = {k: {'precision': [], 'recall': [], 'f1': [], 'ndcg': []} for k in Ks}
 
 
     training_loss = {'epoch': [], 'cf_loss': [], 'kg_loss': [], 'total_loss': []}
@@ -188,13 +188,13 @@ def train(args):
         # evaluate cf
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
             time6 = time()
-            _, metrics_dict = evaluate(model, data, Ks, device)
-            logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-                epoch, time() - time6, metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'], metrics_dict[k_max]['recall'], metrics_dict[k_min]['ndcg'], metrics_dict[k_max]['ndcg']))
+            metrics_dict = evaluate(model, data, Ks, device)
+            logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], F1 [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
+                epoch, time() - time6, metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'], metrics_dict[k_max]['recall'], metrics_dict[k_min]['f1'], metrics_dict[k_max]['f1'], metrics_dict[k_min]['ndcg'], metrics_dict[k_max]['ndcg']))
 
             epoch_list.append(epoch)
             for k in Ks:
-                for m in ['precision', 'recall', 'ndcg']:
+                for m in ['precision', 'recall', 'f1', 'ndcg']:
                     metrics_list[k][m].append(metrics_dict[k][m])
             best_recall, should_stop = early_stopping(metrics_list[k_min]['recall'], args.stopping_steps)
 

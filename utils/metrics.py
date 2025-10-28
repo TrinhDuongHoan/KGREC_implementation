@@ -61,10 +61,13 @@ def recall_at_k_batch(hits, k):
 
 
 def F1(pre, rec):
-    if pre + rec > 0:
-        return (2.0 * pre * rec) / (pre + rec)
-    else:
-        return 0.
+    pre = np.asarray(pre)
+    rec = np.asarray(rec)
+    denom = pre + rec
+    f1 = np.where(denom > 0, (2.0 * pre * rec) / denom, 0.0)
+    if f1.shape == ():
+        return float(f1)
+    return f1
 
 
 def calc_auc(ground_truth, prediction):
@@ -105,6 +108,8 @@ def calc_metrics_at_k(cf_scores, train_user_dict, test_user_dict, user_ids, item
         metrics_dict[k] = {}
         metrics_dict[k]['precision'] = precision_at_k_batch(binary_hit, k)
         metrics_dict[k]['recall']    = recall_at_k_batch(binary_hit, k)
+        metrics_dict[k]['f1']        = F1(metrics_dict[k]['precision'], metrics_dict[k]['recall'])
         metrics_dict[k]['ndcg']      = ndcg_at_k_batch(binary_hit, k)
+
     return metrics_dict
 
