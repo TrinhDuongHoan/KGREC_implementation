@@ -1,0 +1,33 @@
+# KGNN-LS config
+
+# ===== Paths =====
+seed: 2025
+data_name: amazon-book
+data_dir: datasets/                   
+save_dir: trained_model/kgnn_ls/amazon-book/
+
+use_pretrain: 1
+pretrain_embedding_dir: datasets/
+pretrain_model_path: trained_models/model.pth
+embed_dim: 64
+
+# ===== Loader =====
+batch_size: 1024
+test_batch_size: 10000
+neighbor_sample_size: 8
+n_iter : 1
+
+# ===== Model =====
+dim: 64
+l2_weight: 1.0e-6
+ls_weight: 0.1
+
+lr: 1.0e-3
+n_epoch: 50
+stopping_steps: 10
+cf_print_every: 10
+kg_print_every: 10                    
+evaluate_every: 5
+
+# ===== Eval =====
+Ks: "[20, 40, 60, 80, 100]"
