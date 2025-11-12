@@ -7,7 +7,6 @@ import psutil
 import yaml
 import argparse
 import logging
-import csv
 
 
 import pandas as pd
@@ -44,13 +43,11 @@ def evaluate(model, dataloader, Ks, device):
     n_items = dataloader.n_items
     item_ids = torch.arange(n_items, dtype=torch.long).to(device)
 
+    cf_scores = []
     metric_names = ['precision', 'recall', 'f1', 'ndcg']
     metrics_dict = {k: {m: [] for m in metric_names} for k in Ks}
-    # inference timing & GPU peak mem during evaluation
-    total_users = len(user_ids)
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
-    eval_t0 = ttime.perf_counter()
+
+    eval_t0 = ttime.perf_counter() 
 
     with tqdm(total=len(user_ids_batches), desc='Evaluating Iteration') as pbar:
         for batch_user_ids in user_ids_batches:
@@ -61,23 +58,20 @@ def evaluate(model, dataloader, Ks, device):
 
             batch_scores = batch_scores.cpu()
             batch_metrics = calc_metrics_at_k(batch_scores, train_user_dict, test_user_dict, batch_user_ids.cpu().numpy(), item_ids.cpu().numpy(), Ks)
+
+            cf_scores.append(batch_scores.numpy())
             for k in Ks:
                 for m in metric_names:
                     metrics_dict[k][m].append(batch_metrics[k][m])
             pbar.update(1)
 
+    eval_time_s = max(ttime.perf_counter() - eval_t0, 1e-9)
+
+    # cf_scores = np.concatenate(cf_scores, axis=0)
     for k in Ks:
         for m in metric_names:
             metrics_dict[k][m] = np.concatenate(metrics_dict[k][m]).mean()
-    # eval time & mem
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        eval_gpu_peak_mb = torch.cuda.max_memory_allocated() / 1024 / 1024
-    else:
-        eval_gpu_peak_mb = 0.0
-    eval_time_s = max(ttime.perf_counter() - eval_t0, 1e-9)
-    infer_users_per_s = total_users / eval_time_s
-    return metrics_dict, eval_time_s, eval_gpu_peak_mb, infer_users_per_s
+    return metrics_dict, eval_time_s
 
 
 def train(args):
@@ -108,6 +102,11 @@ def train(args):
     model.to(device)
     logging.info(model)
 
+    model_n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    model_param_bytes = sum(p.numel() * p.element_size() for p in model.parameters() if p.requires_grad)
+    model_size_mb = model_param_bytes / (1024.0 * 1024.0)
+    logging.info(f"MODEL STATS | trainable_params: {model_n_params:,} | approx_size: {model_size_mb:.2f} MB")
+
     cf_optimizer = optim.Adam(model.parameters(), lr=args.lr)
     kg_optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
@@ -120,22 +119,23 @@ def train(args):
 
     epoch_list = []
     metrics_list = {k: {'precision': [], 'recall': [], 'f1': [], 'ndcg': []} for k in Ks}
-
-
     training_loss = {'epoch': [], 'cf_loss': [], 'kg_loss': [], 'total_loss': []}
 
-    os.makedirs(args.save_dir, exist_ok=True)
-    # overall runtime summary (single row at end)
-    overall_path = os.path.join(args.save_dir, "runtime_overall.csv")
-    warm_up_iters = 3
-
-    # overall tracking
-    overall_t0 = ttime.perf_counter()
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
-    proc = psutil.Process(os.getpid())
-    cpu_peak_mb_overall = proc.memory_info().rss / 1024 / 1024
-    train_gpu_peak_mb_overall = 0.0
+    train_gpu_peak_bytes = 0  
+    total_t0 = ttime.perf_counter()
+    eval_time_acc = 0.0
+    last_eval_time_s = 0.0
+
+    os.makedirs(args.save_dir, exist_ok=True)
+    training_stats_path = os.path.join(args.save_dir, "runtime_memory.csv")
+    if not os.path.exists(training_stats_path):
+        with open(training_stats_path, "w", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["epoch","iter","phase","wall_time_s","step_time_s","gpu_mem_MB","cpu_mem_MB","batch_size"])
+
+    warm_up_iters = 3
 
     for epoch in range(1, args.n_epoch + 1):
         time0 = time()
@@ -147,6 +147,9 @@ def train(args):
 
         for iter in range(1, n_cf_batch + 1):
             time2 = time()
+
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
 
             iter_wall_start = ttime.perf_counter()
 
@@ -171,14 +174,7 @@ def train(args):
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             
-            iter_end = ttime.perf_counter()
-            step_time = iter_end - iter_start
-            wall_time = iter_end - iter_wall_start
-            # update overall peaks
-            if torch.cuda.is_available():
-                train_gpu_peak_mb_overall = max(train_gpu_peak_mb_overall, torch.cuda.max_memory_allocated() / 1024 / 1024)
-            cpu_peak_mb_overall = max(cpu_peak_mb_overall, proc.memory_info().rss / 1024 / 1024)
-
+            
             if (iter % args.cf_print_every) == 0:
                 logging.info('CF Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_cf_batch, time() - time2, cf_batch_loss.item(), cf_total_loss / iter))
         logging.info('CF Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_cf_batch, time() - time1, cf_total_loss / n_cf_batch))
@@ -190,6 +186,9 @@ def train(args):
 
         for iter in range(1, n_kg_batch + 1):
             time4 = time()
+
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
 
             iter_wall_start = ttime.perf_counter()
 
@@ -215,20 +214,10 @@ def train(args):
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             
-            iter_end = ttime.perf_counter()
-            step_time = iter_end - iter_start
-            wall_time = iter_end - iter_wall_start
-            if torch.cuda.is_available():
-                train_gpu_peak_mb_overall = max(train_gpu_peak_mb_overall, torch.cuda.max_memory_allocated() / 1024 / 1024)
-            cpu_peak_mb_overall = max(cpu_peak_mb_overall, proc.memory_info().rss / 1024 / 1024)
-
             if (iter % args.kg_print_every) == 0:
                 logging.info('KG Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_kg_batch, time() - time4, kg_batch_loss.item(), kg_total_loss / iter))
         logging.info('KG Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_kg_batch, time() - time3, kg_total_loss / n_kg_batch))
         
-        # update training GPU peak with end-of-epoch reading as well
-        if torch.cuda.is_available():
-            train_gpu_peak_mb_overall = max(train_gpu_peak_mb_overall, torch.cuda.max_memory_allocated() / 1024 / 1024)
 
         training_loss['epoch'].append(epoch)
         training_loss['cf_loss'].append(cf_total_loss/n_cf_batch)
@@ -245,13 +234,29 @@ def train(args):
 
         logging.info('CF + KG Training: Epoch {:04d} | Total Time {:.1f}s'.format(epoch, time() - time0))
 
+        if torch.cuda.is_available():
+            epoch_train_peak = torch.cuda.max_memory_allocated()
+            train_gpu_peak_bytes = max(train_gpu_peak_bytes, epoch_train_peak)
+
         # evaluate cf
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
-            time6 = time()
-            metrics_dict, eval_time_s, eval_gpu_peak_mb, infer_users_per_s = evaluate(model, data, Ks, device)
-            logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], F1 [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-                epoch, time() - time6, metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'], metrics_dict[k_max]['recall'], metrics_dict[k_min]['f1'], metrics_dict[k_max]['f1'], metrics_dict[k_min]['ndcg'], metrics_dict[k_max]['ndcg']))
-            logging.info('Inference: time {:.2f}s | users/s {:.1f} | peak GPU {:.1f} MB'.format(eval_time_s, infer_users_per_s, eval_gpu_peak_mb))
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()  # reset so eval peak won't affect training peak
+
+            metrics_dict, eval_time_s = evaluate(model, data, Ks, device)
+            eval_time_acc += eval_time_s
+            last_eval_time_s = eval_time_s
+
+            logging.info('CF Evaluation: Epoch {:04d} | Eval Time {:.1f}s | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], F1 [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'
+                         .format(epoch, eval_time_s,
+                                 metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'],
+                                 metrics_dict[k_min]['recall'],    metrics_dict[k_max]['recall'],
+                                 metrics_dict[k_min]['f1'],        metrics_dict[k_max]['f1'],
+                                 metrics_dict[k_min]['ndcg'],      metrics_dict[k_max]['ndcg']))
+
+            # After eval, reset again to start clean for next epoch's training peak accumulation
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
 
             epoch_list.append(epoch)
             for k in Ks:
@@ -298,25 +303,19 @@ def train(args):
         )
     )
 
-    # write overall runtime metrics (single row)
-    total_train_time_s = max(ttime.perf_counter() - overall_t0, 1e-9)
-    # If no eval ran (e.g., evaluate_every very large), set zeros
-    if 'eval_time_s' not in locals():
-        eval_time_s = 0.0
-        eval_gpu_peak_mb = 0.0
-        infer_users_per_s = 0.0
-    with open(overall_path, "w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["total_train_s","peak_train_gpu_MB","peak_train_cpu_MB","eval_s","eval_users_per_s","eval_gpu_peak_MB"])
-        writer.writerow([
-            round(total_train_time_s, 6),
-            round(train_gpu_peak_mb_overall, 2),
-            round(cpu_peak_mb_overall, 2),
-            round(eval_time_s, 6),
-            round(infer_users_per_s, 2),
-            round(eval_gpu_peak_mb, 2),
-        ])
 
+    total_wall_s = ttime.perf_counter() - total_t0
+    total_train_s = max(total_wall_s - eval_time_acc, 0.0)
+    train_gpu_peak_mb = (train_gpu_peak_bytes / 1024 / 1024) if torch.cuda.is_available() else 0.0
+
+    overall_csv = os.path.join(args.save_dir, "runtime_overall.csv")
+    with open(overall_csv, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["total_training_time", "model_size_MB", "model_params", "peak_train_gpu_MB", "inference_time_s"])
+        writer.writerow([round(total_train_s, 6), round(model_size_mb, 2), round(model_n_params, 2), round(train_gpu_peak_mb, 2), round(last_eval_time_s, 6)])
+
+    logging.info("RUNTIME SUMMARY | total_training_time: {:.2f} | model_size: {:.2f} | model_params: {:.2f} | peak_train_gpu_MB: {:.1f} | inference_time_s: {:.2f}"
+                 .format(total_train_s, model_size_mb, model_n_params, train_gpu_peak_mb, last_eval_time_s))
 
 
 if __name__ == '__main__':
