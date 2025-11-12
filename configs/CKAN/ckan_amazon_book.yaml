@@ -16,7 +16,7 @@ test_batch_size: 10000
 lr: 0.002
 n_epoch: 50
 stopping_steps: 10
-evaluate_every: 1
+evaluate_every: 5
 cf_l2loss_lambda: 1e-5
 laplacian_type: random-walk
 cf_print_every: 10

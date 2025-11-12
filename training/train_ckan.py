@@ -5,6 +5,8 @@ from time import time
 import yaml
 import argparse
 import logging
+import csv
+import time as ttime
 import pathlib
 
 import pandas as pd
@@ -42,6 +44,7 @@ def tile_triple_set(ts, n):
     return _tile_list(H, n), _tile_list(R, n), _tile_list(T, n)
 
 def evaluate(model, loader, Ks, device, item_bs=4096, user_bs=512, eval_user_limit=None):
+    eval_t0 = ttime.perf_counter()
     model.eval()
     train_user_dict = loader.train_user_dict
     test_user_dict  = loader.test_user_dict
@@ -104,7 +107,10 @@ def evaluate(model, loader, Ks, device, item_bs=4096, user_bs=512, eval_user_lim
     for k in Ks:
         for m in metric_names:
             metrics_dict[k][m] = np.concatenate(metrics_dict[k][m]).mean()
-    return cf_scores, metrics_dict
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    eval_time_s = max(ttime.perf_counter() - eval_t0, 1e-9)
+    return cf_scores, metrics_dict, eval_time_s
 
 
 
@@ -144,6 +150,12 @@ def train(args):
     ).to(device)
     logging.info(model)
 
+    # --- model stats: number of trainable params and approximate model size (MB) ---
+    model_n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    model_param_bytes = sum(p.numel() * p.element_size() for p in model.parameters() if p.requires_grad)
+    model_size_mb = model_param_bytes / (1024.0 * 1024.0)
+    logging.info(f"MODEL STATS | trainable_params: {model_n_params:,} | approx_size: {model_size_mb:.2f} MB")
+
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     Ks = args.Ks if isinstance(args.Ks, list) else [int(x) for x in str(args.Ks).strip("[]").split(",")]
@@ -154,6 +166,14 @@ def train(args):
     training_loss = {'epoch': [], 'cf_loss': [], 'kg_loss': [], 'total_loss': []}  
 
     best_epoch, best_recall = -1, 0
+
+    # Overall trackers for totals
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    train_gpu_peak_bytes = 0
+    overall_t0 = ttime.perf_counter()
+    eval_time_acc = 0.0
+    last_eval_time_s = 0.0
 
     for epoch in range(1, args.n_epoch + 1):
         t0 = time()
@@ -197,14 +217,23 @@ def train(args):
 
         logging.info('Epoch {:04d} | Total Time {:.1f}s'.format(epoch, time() - t0))
 
+        # snapshot training GPU peak up to this point
+        if torch.cuda.is_available():
+            train_gpu_peak_bytes = max(train_gpu_peak_bytes, torch.cuda.max_memory_allocated())
+
         # ---- Evaluate ----
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
-            t_eval = time()
-            _, metrics_dict = evaluate(model, data, Ks, device)
+            # snapshot training peak before eval and reset to avoid pollution
+            if torch.cuda.is_available():
+                train_gpu_peak_bytes = max(train_gpu_peak_bytes, torch.cuda.max_memory_allocated())
+                torch.cuda.reset_peak_memory_stats()
+            _, metrics_dict, eval_time_s = evaluate(model, data, Ks, device)
+            last_eval_time_s = eval_time_s
+            eval_time_acc += eval_time_s
             logging.info(
                 'CF Evaluation: Epoch {:04d} | Time {:.1f}s | '
                 'Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-                    epoch, time() - t_eval,
+                    epoch, eval_time_s,
                     metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'],
                     metrics_dict[k_min]['recall'],    metrics_dict[k_max]['recall'],
                     metrics_dict[k_min]['ndcg'],      metrics_dict[k_max]['ndcg']
@@ -252,6 +281,27 @@ def train(args):
                 best_metrics[f"ndcg@{k_min}"],      best_metrics[f"ndcg@{k_max}"]
             )
         )
+
+    # Write overall runtime summary
+    total_wall_s = ttime.perf_counter() - overall_t0
+    total_train_s = max(total_wall_s - eval_time_acc, 0.0)
+    train_gpu_peak_mb = (train_gpu_peak_bytes / 1024 / 1024) if torch.cuda.is_available() else 0.0
+    overall_csv = os.path.join(args.save_dir, "runtime_overall.csv")
+    with open(overall_csv, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["total_train_s", "peak_train_gpu_MB", "inference_time_s", "n_params", "model_size_MB"])
+        writer.writerow([
+            round(total_train_s, 6),
+            round(train_gpu_peak_mb, 2),
+            round(last_eval_time_s, 6),
+            int(model_n_params),
+            round(model_size_mb, 2)
+        ])
+    logging.info(
+        "RUNTIME SUMMARY | train_total_s: {:.2f} | peak_train_gpu_MB: {:.1f} | inference_time_s: {:.2f} | params: {} | model_size_MB: {:.2f}".format(
+            total_train_s, train_gpu_peak_mb, last_eval_time_s, model_n_params, model_size_mb
+        )
+    )
 
 
 if __name__ == '__main__':
