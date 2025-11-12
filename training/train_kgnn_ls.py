@@ -41,7 +41,7 @@ def evaluate(model, loader, Ks, device, user_bs=256, item_chunk=4096, use_fp16=T
     model.build_item_cache(device, n_items=loader.n_items, chunk=item_chunk)
 
     user_ids = list(test_user_dict.keys())
-    metric_names = ['precision', 'recall', 'ndcg']
+    metric_names = ['precision', 'recall', 'f1', 'ndcg']
     metrics_dict = {k: {m: [] for m in metric_names} for k in Ks}
 
     for s in range(0, len(user_ids), user_bs):
@@ -115,7 +115,7 @@ def train(args):
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     Ks = eval(args.Ks); k_min, k_max = min(Ks), max(Ks)
-    epoch_list = []; metrics_list = {k: {'precision': [], 'recall': [], 'ndcg': []} for k in Ks}
+    epoch_list = []; metrics_list = {k: {'precision': [], 'recall': [], 'f1': [], 'ndcg': []} for k in Ks}
     training_loss = {'epoch': [], 'cf_loss': [], 'kg_loss': [], 'total_loss': []}
     best_epoch = -1
 
@@ -177,16 +177,17 @@ def train(args):
             _, metrics_dict, eval_time_s = evaluate(model, data, Ks, device)
             last_eval_time_s = eval_time_s
             eval_time_acc += eval_time_s
-            logging.info('CF Evaluation: Epoch {:04d} | Time {:.1f}s | P [{:.4f}, {:.4f}], R [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
+            logging.info('CF Evaluation: Epoch {:04d} | Time {:.1f}s | P [{:.4f}, {:.4f}], R [{:.4f}, {:.4f}], F1 [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
                 epoch, eval_time_s,
                 metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'],
                 metrics_dict[k_min]['recall'],    metrics_dict[k_max]['recall'],
+                metrics_dict[k_min]['f1'],        metrics_dict[k_max]['f1'],
                 metrics_dict[k_min]['ndcg'],      metrics_dict[k_max]['ndcg']
             ))
 
             epoch_list.append(epoch)
             for k in Ks:
-                for m in ['precision', 'recall', 'ndcg']:
+                for m in ['precision', 'recall', 'f1', 'ndcg']:
                     metrics_list[k][m].append(metrics_dict[k][m])
 
             best_recall, should_stop = early_stopping(metrics_list[k_min]['recall'], args.stopping_steps)
@@ -205,7 +206,7 @@ def train(args):
     for i, ep in enumerate(epoch_list):
         row = {"epoch_idx": ep}
         for k in Ks:
-            for m in ["precision", "recall", "ndcg"]:
+            for m in ["precision", "recall", "f1", "ndcg"]:
                 if i < len(metrics_list[k][m]):
                     row[f"{m}@{k}"] = metrics_list[k][m][i]
         records.append(row)
@@ -220,10 +221,11 @@ def train(args):
     row = metrics_df.loc[metrics_df["epoch_idx"] == best_epoch]
     if not row.empty:
         bm = row.iloc[0].to_dict()
-        logging.info("Best CF Evaluation: Epoch {:04d} | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]".format(
+        logging.info("Best CF Evaluation: Epoch {:04d} | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], F1 [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]".format(
             int(bm["epoch_idx"]),
             bm.get(f"precision@{k_min}", float('nan')), bm.get(f"precision@{k_max}", float('nan')),
             bm.get(f"recall@{k_min}", float('nan')),    bm.get(f"recall@{k_max}", float('nan')),
+            bm.get(f"f1@{k_min}", float('nan')),        bm.get(f"f1@{k_max}", float('nan')),
             bm.get(f"ndcg@{k_min}", float('nan')),      bm.get(f"ndcg@{k_max}", float('nan')),
         ))
 
