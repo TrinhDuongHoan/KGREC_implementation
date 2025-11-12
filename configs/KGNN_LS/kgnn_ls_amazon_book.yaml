@@ -13,7 +13,7 @@ embed_dim: 64
 
 # ===== Loader =====
 batch_size: 1024
-test_batch_size: 10000
+test_batch_size: 2048
 neighbor_sample_size: 8
 n_iter : 1
 

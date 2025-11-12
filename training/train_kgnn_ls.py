@@ -2,9 +2,11 @@ import os
 import sys
 import random
 from time import time
+import time as ttime
 import yaml
 import argparse
 import logging
+import csv
 
 import pandas as pd
 from tqdm import tqdm
@@ -31,6 +33,7 @@ def ls_schedule(epoch):
 
 @torch.no_grad()
 def evaluate(model, loader, Ks, device, user_bs=256, item_chunk=4096, use_fp16=True):
+    eval_t0 = ttime.perf_counter()
     train_user_dict = loader.train_user_dict
     test_user_dict  = loader.test_user_dict
 
@@ -67,7 +70,10 @@ def evaluate(model, loader, Ks, device, user_bs=256, item_chunk=4096, use_fp16=T
         for m in metric_names:
             metrics_dict[k][m] = np.concatenate(metrics_dict[k][m]).mean()
 
-    return None, metrics_dict  # không trả cf_scores để tiết kiệm RAM
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    eval_time_s = max(ttime.perf_counter() - eval_t0, 1e-9)
+    return None, metrics_dict, eval_time_s  # không trả cf_scores để tiết kiệm RAM
 
 
 def train(args):
@@ -100,12 +106,26 @@ def train(args):
 
     logging.info(model)
 
+    # --- model stats: number of trainable params and approximate model size (MB) ---
+    model_n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    model_param_bytes = sum(p.numel() * p.element_size() for p in model.parameters() if p.requires_grad)
+    model_size_mb = model_param_bytes / (1024.0 * 1024.0)
+    logging.info(f"MODEL STATS | trainable_params: {model_n_params:,} | approx_size: {model_size_mb:.2f} MB")
+
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     Ks = eval(args.Ks); k_min, k_max = min(Ks), max(Ks)
     epoch_list = []; metrics_list = {k: {'precision': [], 'recall': [], 'ndcg': []} for k in Ks}
     training_loss = {'epoch': [], 'cf_loss': [], 'kg_loss': [], 'total_loss': []}
     best_epoch = -1
+
+    # Overall trackers
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    train_gpu_peak_bytes = 0
+    overall_t0 = ttime.perf_counter()
+    eval_time_acc = 0.0
+    last_eval_time_s = 0.0
 
     for epoch in range(1, args.n_epoch + 1):
         time0 = time()
@@ -144,11 +164,21 @@ def train(args):
         # updatemode=_att noop
         model(None, None, mode='update_att')
 
+        # snapshot training GPU peak up to now
+        if torch.cuda.is_available():
+            train_gpu_peak_bytes = max(train_gpu_peak_bytes, torch.cuda.max_memory_allocated())
+
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
+            # snapshot training peak and reset to isolate eval
+            if torch.cuda.is_available():
+                train_gpu_peak_bytes = max(train_gpu_peak_bytes, torch.cuda.max_memory_allocated())
+                torch.cuda.reset_peak_memory_stats()
             time6 = time()
-            _, metrics_dict = evaluate(model, data, Ks, device)
+            _, metrics_dict, eval_time_s = evaluate(model, data, Ks, device)
+            last_eval_time_s = eval_time_s
+            eval_time_acc += eval_time_s
             logging.info('CF Evaluation: Epoch {:04d} | Time {:.1f}s | P [{:.4f}, {:.4f}], R [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-                epoch, time() - time6,
+                epoch, eval_time_s,
                 metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'],
                 metrics_dict[k_min]['recall'],    metrics_dict[k_max]['recall'],
                 metrics_dict[k_min]['ndcg'],      metrics_dict[k_max]['ndcg']
@@ -196,6 +226,27 @@ def train(args):
             bm.get(f"recall@{k_min}", float('nan')),    bm.get(f"recall@{k_max}", float('nan')),
             bm.get(f"ndcg@{k_min}", float('nan')),      bm.get(f"ndcg@{k_max}", float('nan')),
         ))
+
+    # Overall summary
+    total_wall_s = ttime.perf_counter() - overall_t0
+    total_train_s = max(total_wall_s - eval_time_acc, 0.0)
+    train_gpu_peak_mb = (train_gpu_peak_bytes / 1024 / 1024) if torch.cuda.is_available() else 0.0
+    overall_csv = os.path.join(args.save_dir, "runtime_overall.csv")
+    with open(overall_csv, "w", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["total_train_s", "peak_train_gpu_MB", "inference_time_s", "n_params", "model_size_MB"])
+        writer.writerow([
+            round(total_train_s, 6),
+            round(train_gpu_peak_mb, 2),
+            round(last_eval_time_s, 6),
+            int(model_n_params),
+            round(model_size_mb, 2)
+        ])
+    logging.info(
+        "RUNTIME SUMMARY | train_total_s: {:.2f} | peak_train_gpu_MB: {:.1f} | inference_time_s: {:.2f} | params: {} | model_size_MB: {:.2f}".format(
+            total_train_s, train_gpu_peak_mb, last_eval_time_s, model_n_params, model_size_mb
+        )
+    )
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
