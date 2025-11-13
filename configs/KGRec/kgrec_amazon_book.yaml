@@ -1,7 +1,7 @@
 seed: 2025
 data_name: amazon-book
 data_dir: datasets/
-use_attention: 0
+use_attention: 1
 use_pretrain: 1
 pretrain_embedding_dir: datasets/
 pretrain_model_path: trained_model/model.pth
@@ -12,7 +12,7 @@ test_batch_size: 10000
 embed_dim: 64
 relation_dim: 64
 laplacian_type: random-walk
-aggregation_type: bi-interaction
+aggregation_type: graphsage
 conv_dim_list: '[64, 32, 16]'
 mess_dropout: '[0.1, 0.1, 0.1]'
 kg_l2loss_lambda: 0.00001
@@ -22,5 +22,5 @@ n_epoch: 50
 stopping_steps: 10
 cf_print_every: 10
 kg_print_every: 10
-evaluate_every: 50
+evaluate_every: 5
 Ks: '[20, 40, 60, 80, 100]'
