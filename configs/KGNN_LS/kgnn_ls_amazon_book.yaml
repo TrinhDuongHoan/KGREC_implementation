@@ -4,7 +4,7 @@
 seed: 2025
 data_name: amazon-book
 data_dir: datasets/                   
-save_dir: trained_model/kgnn_ls/amazon-book/
+save_dir: trained_model/KGNN_LS/amazon-book/
 
 use_pretrain: 1
 pretrain_embedding_dir: datasets/

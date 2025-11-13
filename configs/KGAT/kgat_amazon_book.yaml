@@ -1,0 +1,40 @@
+seed: 2025
+data_name: amazon-book
+
+data_dir: datasets/
+use_pretrain: 1            
+pretrain_embedding_dir: datasets/
+pretrain_model_path: trained_model/model.
+save_dir: trained_model/kgat/amazon-book/
+
+
+batch_size: 1024          
+batch_size_kg: 2048        
+test_batch_size: 512      
+
+
+embed_dim: 64             
+kge_dim: 64             
+layer_size: "[64,32,16,8]"   
+
+
+adj_type: pre             
+adj_uni_type: sum          
+alg_type: bi                
+
+
+regs: "[1e-5,1e-5,1e-5]"   
+verbose: 1              
+
+
+lr: 0.0001
+n_epoch: 50
+stopping_steps: 10         
+cf_print_every: 10        
+kg_print_every: 10         
+evaluate_every: 5
+
+Ks: "[20,40,60,80,100]"     
+save_dir: trained_model/KGAT/amazon-book/
+
+

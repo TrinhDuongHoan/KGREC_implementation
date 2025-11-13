@@ -1,0 +1,39 @@
+seed: 2025
+data_name: last-fm
+# Relative to project root
+data_dir: datasets/
+use_pretrain: 1            # 0: no pretrain, 1: load embeddings, 2: load stored model
+pretrain_embedding_dir: datasets/
+pretrain_model_path: trained_model/model.
+save_dir: trained_model/KGAT/last-fm/
+
+# --- Batching ---
+batch_size: 1024           # CF batch size (phase I)
+batch_size_kg: 2048        # KG batch size (phase II)
+test_batch_size: 2048       # Evaluation user batch size
+
+# --- Embedding sizes ---
+embed_dim: 64              # user/entity embedding dim (trainer will alias to embed_size)
+kge_dim: 64                # KG embedding dimension (trainer will alias to kge_size)
+layer_size: "[64,32,16,8]"    # list of message passing hidden sizes
+
+# --- Graph & aggregation type ---
+adj_type: pre               # adjacency base type (as in original implementation)
+adj_uni_type: sum           # unify type {sum, ...} per original KGAT code
+alg_type: bi                # {bi, kgat, gcn, graphsage}; bi-interaction is default
+
+# --- Regularization & verbosity ---
+regs: "[1e-5,1e-5,1e-5]"   # L2 regs (size should match components expected)
+verbose: 1                 # verbosity flag
+
+# --- Training control ---
+lr: 0.0001
+n_epoch: 50
+stopping_steps: 10          # early stopping patience
+cf_print_every: 10           # print frequency CF phase
+kg_print_every: 10           # print frequency KG phase
+evaluate_every: 5          
+
+# --- Evaluation ---
+Ks: "[20,40,60,80,100]"     # metrics cutoffs
+  
