@@ -224,13 +224,16 @@ def train(args):
         training_loss['kg_loss'].append(kg_total_loss/n_kg_batch)
         training_loss['total_loss'].append(cf_total_loss/n_cf_batch + kg_total_loss/n_kg_batch)
 
-        time5 = time()
-        h_list = data.h_list.to(device)
-        t_list = data.t_list.to(device)
-        r_list = data.r_list.to(device)
-        relations = list(data.laplacian_dict.keys())
-        model(h_list, t_list, r_list, relations, mode='update_att')
-        logging.info('Update Attention: Epoch {:04d} | Total Time {:.1f}s'.format(epoch, time() - time5))
+        if args.use_attention:
+            time5 = time()
+            h_list = data.h_list.to(device)
+            t_list = data.t_list.to(device)
+            r_list = data.r_list.to(device)
+            relations = list(data.laplacian_dict.keys())
+            model(h_list, t_list, r_list, relations, mode='update_att')
+            logging.info('Update Attention: Epoch {:04d} | Total Time {:.1f}s'.format(epoch, time() - time5))
+        else:
+            logging.info('Skip attention update (use_attention=0)')
 
         logging.info('CF + KG Training: Epoch {:04d} | Total Time {:.1f}s'.format(epoch, time() - time0))
 
