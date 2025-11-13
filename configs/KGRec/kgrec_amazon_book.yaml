@@ -12,7 +12,7 @@ test_batch_size: 10000
 embed_dim: 64
 relation_dim: 64
 laplacian_type: random-walk
-aggregation_type: graphsage
+aggregation_type: gcn
 conv_dim_list: '[64, 32, 16]'
 mess_dropout: '[0.1, 0.1, 0.1]'
 kg_l2loss_lambda: 0.00001
