@@ -11,7 +11,7 @@ kg_batch_size: 2048
 test_batch_size: 10000
 embed_dim: 64
 relation_dim: 64
-laplacian_type: symmetric
+laplacian_type: random-walk
 aggregation_type: bi-interaction
 conv_dim_list: '[64, 32, 16]'
 mess_dropout: '[0.1, 0.1, 0.1]'
