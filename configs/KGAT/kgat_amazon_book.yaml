@@ -4,7 +4,7 @@ data_name: amazon-book
 data_dir: datasets/
 use_pretrain: 1            
 pretrain_embedding_dir: datasets/
-pretrain_model_path: trained_model/model.
+pretrain_model_path: trained_model/model.pth
 save_dir: trained_model/kgat/amazon-book/
 
 
@@ -15,7 +15,9 @@ test_batch_size: 2048
 
 embed_dim: 64             
 kge_dim: 64             
-layer_size: "[64,32,16,8]"   
+layer_size: "[64, 32, 16, 8]"
+mess_dropout: "[0.1, 0.1, 0.1, 0.1]"
+update_A_every: 1  
 
 
 adj_type: pre             
@@ -28,11 +30,11 @@ verbose: 1
 
 
 lr: 0.0001
-n_epoch: 50
-stopping_steps: 10         
+n_epoch: 20
+stopping_steps: 5          
 cf_print_every: 10        
 kg_print_every: 10         
-evaluate_every: 5
+evaluate_every: 2
 
 Ks: "[20,40,60,80,100]"     
 save_dir: trained_model/KGAT/amazon-book/
