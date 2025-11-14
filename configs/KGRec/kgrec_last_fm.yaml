@@ -13,8 +13,8 @@ embed_dim: 64
 relation_dim: 64
 laplacian_type: random-walk
 aggregation_type: bi-interaction
-conv_dim_list: '[64, 32, 16, 8]'
-mess_dropout: '[0.1, 0.1, 0.1, 0.1]'
+conv_dim_list: '[64, 32 ]'
+mess_dropout: '[0.1, 0.1]'
 kg_l2loss_lambda: 0.00001
 cf_l2loss_lambda: 0.00001
 lr: 0.0001
