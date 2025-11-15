@@ -5,14 +5,14 @@ use_attention: 1
 use_pretrain: 1
 pretrain_embedding_dir: datasets/
 pretrain_model_path: trained_model/model.pth
-save_dir : trained_model/KGRec/hm-kg/
+save_dir : trained_model/KGRec/movielens-1m/
 cf_batch_size: 1024
 kg_batch_size: 2048
 test_batch_size: 10000
 embed_dim: 64
 relation_dim: 64
-laplacian_type: symmetric
-aggregation_type: bi-interaction
+laplacian_type: random-walk
+aggregation_type: graphsage
 conv_dim_list: '[64, 32, 16]'
 mess_dropout: '[0.1, 0.1, 0.1]'
 kg_l2loss_lambda: 0.00001
