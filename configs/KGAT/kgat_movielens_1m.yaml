@@ -23,8 +23,8 @@ verbose: 1
 lr: 0.0001
 n_epoch: 50
 stopping_steps: 10
-cf_print_every: 1
-kg_print_every: 1
+cf_print_every: 10
+kg_print_every: 10
 evaluate_every: 5
 
 Ks: "[20,40,60,80,100]"
