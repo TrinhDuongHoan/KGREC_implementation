@@ -1,7 +1,7 @@
 seed: 2025
 data_name: movielens-1m
 data_dir: datasets/
-use_attention: 0
+use_attention: 1
 use_pretrain: 1
 pretrain_embedding_dir: datasets/
 pretrain_model_path: trained_model/model.pth
@@ -11,7 +11,7 @@ kg_batch_size: 2048
 test_batch_size: 10000
 embed_dim: 64
 relation_dim: 64
-laplacian_type: random-walk
+laplacian_type: symmetric
 aggregation_type: bi-interaction
 conv_dim_list: '[64, 32, 16]'
 mess_dropout: '[0.1, 0.1, 0.1]'
