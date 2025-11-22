@@ -1,4 +1,3 @@
-# loaders/ckan_loader.py
 import os
 import random
 import collections
@@ -16,12 +15,11 @@ class DataLoaderCKAN(DataLoaderBase):
     def __init__(self, args, logging):
         super().__init__(args, logging)
         self.cf_batch_size = args.cf_batch_size
-        # self.kg_batch_size = args.kg_batch_size
         self.test_batch_size = args.test_batch_size
 
         self.n_neighbor = getattr(args, "n_neighbor", 8)
         self.n_layer = getattr(args, "n_layer", 1)
-        self.rng = np.random.RandomState(getattr(args, "seed", 2024))
+        self.rng = np.random.RandomState(getattr(args, "seed", 2025))
 
         kg_data = self.load_kg(self.kg_file)
         self.construct_data(kg_data)
@@ -65,7 +63,6 @@ class DataLoaderCKAN(DataLoaderBase):
         self.kg_train_data = pd.concat([kg_data, cf2kg, inv_cf2kg], ignore_index=True)
         self.n_kg_train = len(self.kg_train_data)
 
-        # lists + dicts
         h_list, t_list, r_list = [], [], []
         self.train_kg_dict = collections.defaultdict(list)        # h -> [(t, r), ...]
         self.train_relation_dict = collections.defaultdict(list)   # r -> [(h, t), ...]
@@ -80,10 +77,8 @@ class DataLoaderCKAN(DataLoaderBase):
         self.t_list = torch.LongTensor(t_list)
         self.r_list = torch.LongTensor(r_list)
 
-        # tiện cho sampling
         self.all_items = np.arange(self.n_items, dtype=np.int64)
 
-    # -------- sparse helpers --------
     def convert_coo2tensor(self, coo):
         values = coo.data
         indices = np.vstack((coo.row, coo.col))
@@ -128,7 +123,6 @@ class DataLoaderCKAN(DataLoaderBase):
         A_in = sum(self.laplacian_dict.values())
         self.A_in = self.convert_coo2tensor(A_in.tocoo())
 
-    # -------- CF batch + triple-set cho CKAN --------
     def generate_cf_batch(self, user_dict=None, batch_size=None):
         if user_dict is None:
             user_dict = self.train_user_dict
@@ -150,10 +144,7 @@ class DataLoaderCKAN(DataLoaderBase):
                 torch.LongTensor(neg))
 
     def _sample_layer(self, seeds_np):
-        """
-        seeds_np: (B,) ndarray các entity id.
-        Trả về H,R,T: (B, n_neighbor) mỗi lớp.
-        """
+
         B = seeds_np.shape[0]
         h = np.zeros((B, self.n_neighbor), dtype=np.int64)
         r = np.zeros((B, self.n_neighbor), dtype=np.int64)
@@ -165,33 +156,27 @@ class DataLoaderCKAN(DataLoaderBase):
                 continue
             idx = self.rng.randint(0, len(neigh), size=self.n_neighbor)
             for j, k in enumerate(idx):
-                _t, _r = neigh[k]         # lưu dạng (t, r)
+                _t, _r = neigh[k]        
                 h[i, j] = e
                 r[i, j] = _r
                 t[i, j] = _t
         return h, r, t
 
     def _build_triple_set(self, seeds_tensor):
-        """
-        seeds_tensor: [B] LongTensor (entities)
-        Trả về tuple (H_list, R_list, T_list),
-          mỗi phần tử là Tensor [B, n_neighbor]
-        """
+
         device = seeds_tensor.device
         seeds = seeds_tensor.detach().cpu().numpy()
         H_list, R_list, T_list = [], [], []
 
-        # lớp 1..n_layer
         for _ in range(self.n_layer):
             h, r, t = self._sample_layer(seeds)
             H_list.append(torch.from_numpy(h).to(device))
             R_list.append(torch.from_numpy(r).to(device))
             T_list.append(torch.from_numpy(t).to(device))
-            # chuyển seed cho lớp sau: lấy cột 0 (đơn giản)
             seeds = t[:, 0]
 
-        # nếu muốn có "level-0 mean pooling" giống KRec, có thể thêm ở đây
-        if not H_list:  # n_layer=0: tạo placeholder từ chính seeds
+        
+        if not H_list:  
             h0 = seeds_tensor.unsqueeze(1).repeat(1, self.n_neighbor)
             r0 = torch.zeros_like(h0)
             t0 = h0.clone()
@@ -200,10 +185,6 @@ class DataLoaderCKAN(DataLoaderBase):
         return (H_list, R_list, T_list)
 
     def build_user_triple_set(self, users: torch.LongTensor):
-        """
-        Chọn một positive item của mỗi user làm seed (đơn giản).
-        users: [B] đã dịch lên entity space (u >= n_entities)
-        """
         seeds = []
         for u in users.tolist():
             items = self.train_user_dict[u]
@@ -214,7 +195,6 @@ class DataLoaderCKAN(DataLoaderBase):
     def build_item_triple_set(self, items: torch.LongTensor):
         return self._build_triple_set(items)
 
-    # -------- logs --------
     def print_info(self, logging):
         logging.info('n_users:           %d' % self.n_users)
         logging.info('n_items:           %d' % self.n_items)

@@ -43,7 +43,6 @@ class KGAT(torch.nn.Module):
         self._emb_cache = None
         self._emb_cache_dirty = True
 
-    # ---------- args ----------
     def _parse_args(self, data_config, pretrain_data, args):
         self.model_type = 'kgat'
         self.pretrain_data = pretrain_data
@@ -79,7 +78,6 @@ class KGAT(torch.nn.Module):
         self.regs    = list(eval(args.regs))
         self.verbose = args.verbose
 
-        # mess_dropout từ YAML (giống KGRec)
         if hasattr(args, "mess_dropout"):
             if isinstance(args.mess_dropout, str):
                 self.mess_dropout_cfg = list(eval(args.mess_dropout))
@@ -107,11 +105,8 @@ class KGAT(torch.nn.Module):
         self.node_dropout = 'node_dropout'
         self.mess_dropout = 'mess_dropout'
 
-    # ---------- params ----------
     def _build_weights(self):
         W = dict()
-
-        # embeddings
         if self.pretrain_data is None:
             W['user_embed']   = nn.Parameter(torch.empty(self.n_users, self.emb_dim))
             W['entity_embed'] = nn.Parameter(torch.empty(self.n_entities, self.emb_dim))
@@ -163,7 +158,6 @@ class KGAT(torch.nn.Module):
         self._all_user_entity = None
         return nn.ParameterDict(W)
 
-    # ---------- state dict ----------
     def state_dict(self, *args, **kwargs):
         sd = {}
         for k, v in self.weights.items():
@@ -183,7 +177,6 @@ class KGAT(torch.nn.Module):
             raise KeyError(f'Missing weights: {missing}')
         return
 
-    # ---------- phase I ----------
     def _build_model_phase_I(self):
         self.ua_embeddings = None
         self.ea_embeddings = None
@@ -302,7 +295,6 @@ class KGAT(torch.nn.Module):
                 total += p.numel()
             print("#params: %d" % total)
 
-    # ---------- utils ----------
     def _create_attentive_A_out(self, A_values: np.ndarray):
         idx = torch.tensor(
             np.vstack([self.all_h_list, self.all_t_list]),
@@ -332,7 +324,6 @@ class KGAT(torch.nn.Module):
             return x.to(self.device, dtype=torch.long)
         return torch.as_tensor(x, device=self.device, dtype=torch.long)
 
-    # ---------- train CF ----------
     def train(self, sess, feed_dict):
         self._training_flag = True
 
@@ -384,7 +375,6 @@ class KGAT(torch.nn.Module):
             float(self.reg_loss.item()),
         )
 
-    # ---------- train KG ----------
     def train_A(self, sess, feed_dict):
         self._training_flag = True
 

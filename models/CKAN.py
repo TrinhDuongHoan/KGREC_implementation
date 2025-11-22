@@ -33,7 +33,6 @@ class CKANCore(nn.Module):
 
     
     def _agg_embeddings(self, items, user_triple_set, item_triple_set):
-        # user
         user_embeddings = []
         user_emb_0 = self.entity_emb(user_triple_set[0][0])      # [B, T, D]
         user_embeddings.append(user_emb_0.mean(dim=1))           # [B, D]
@@ -43,7 +42,6 @@ class CKANCore(nn.Module):
             t = self.entity_emb(user_triple_set[2][i])           # [B, T, D]
             user_embeddings.append(self._knowledge_attention(h, r, t))  # [B, D]
 
-        # item
         item_embeddings = []
         item_origin = self.entity_emb(items)                     # [B, D]
         item_embeddings.append(item_origin)
@@ -56,7 +54,6 @@ class CKANCore(nn.Module):
             item_emb0 = self.entity_emb(item_triple_set[0][0])   # [B, T, D]
             item_embeddings.append(item_emb0.mean(dim=1))        # [B, D]
 
-        # combine
         e_u = user_embeddings[0]
         e_v = item_embeddings[0]
         if self.agg == 'concat':
@@ -75,7 +72,6 @@ class CKANCore(nn.Module):
         return e_u, e_v
 
     def _knowledge_attention(self, h_emb, r_emb, t_emb):
-        # h_emb,r_emb,t_emb: [B, T, D]
         att = self.attention(torch.cat([h_emb, r_emb], dim=-1)).squeeze(-1)  # [B, T]
         att = F.softmax(att, dim=-1)
         out = (att.unsqueeze(-1) * t_emb).sum(dim=1)  # [B, D]

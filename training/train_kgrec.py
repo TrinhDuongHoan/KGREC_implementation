@@ -179,7 +179,6 @@ def train(args):
                 logging.info('CF Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_cf_batch, time() - time2, cf_batch_loss.item(), cf_total_loss / iter))
         logging.info('CF Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_cf_batch, time() - time1, cf_total_loss / n_cf_batch))
 
-        # train kg
         time3 = time()
         kg_total_loss = 0
         n_kg_batch = data.n_kg_train // data.kg_batch_size + 1
@@ -241,10 +240,9 @@ def train(args):
             epoch_train_peak = torch.cuda.max_memory_allocated()
             train_gpu_peak_bytes = max(train_gpu_peak_bytes, epoch_train_peak)
 
-        # evaluate cf
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
             if torch.cuda.is_available():
-                torch.cuda.reset_peak_memory_stats()  # reset so eval peak won't affect training peak
+                torch.cuda.reset_peak_memory_stats()
 
             metrics_dict, eval_time_s = evaluate(model, data, Ks, device)
             eval_time_acc += eval_time_s
@@ -257,7 +255,6 @@ def train(args):
                                  metrics_dict[k_min]['f1'],        metrics_dict[k_max]['f1'],
                                  metrics_dict[k_min]['ndcg'],      metrics_dict[k_max]['ndcg']))
 
-            # After eval, reset again to start clean for next epoch's training peak accumulation
             if torch.cuda.is_available():
                 torch.cuda.reset_peak_memory_stats()
 
@@ -279,7 +276,6 @@ def train(args):
     training_loss_path = os.path.join(args.save_dir, "training_loss.csv")
     training_loss_df.to_csv(training_loss_path, index=False)
 
-    # save metrics
     metrics_records = []
     for i, epoch in enumerate(epoch_list):
         row = {"epoch_idx": epoch}
@@ -293,7 +289,6 @@ def train(args):
     csv_path = os.path.join(args.save_dir, "kgrect_metrics.csv")
     metrics_df.to_csv(csv_path, index=False)
 
-    # --- In best metrics ---
     best_metrics = metrics_df.loc[metrics_df["epoch_idx"] == best_epoch].iloc[0].to_dict()
     logging.info(
         "Best CF Evaluation: Epoch {:04d} | "

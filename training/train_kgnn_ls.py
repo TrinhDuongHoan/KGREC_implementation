@@ -37,7 +37,6 @@ def evaluate(model, loader, Ks, device, user_bs=256, item_chunk=4096, use_fp16=T
     train_user_dict = loader.train_user_dict
     test_user_dict  = loader.test_user_dict
 
-    # precompute item cache  (1 lần)
     model.build_item_cache(device, n_items=loader.n_items, chunk=item_chunk)
 
     user_ids = list(test_user_dict.keys())
@@ -50,8 +49,7 @@ def evaluate(model, loader, Ks, device, user_bs=256, item_chunk=4096, use_fp16=T
 
         scores = model.predict_from_cache(u_batch)          # [B, I], float32
         if use_fp16:
-            scores = scores.half()                          # giảm 1/2 RAM
-        # chuyển sang numpy theo batch, KHÔNG tích lũy cf_scores
+            scores = scores.half()                          
         batch_metrics = calc_metrics_at_k(
             scores.cpu(),
             train_user_dict, test_user_dict,
@@ -63,9 +61,8 @@ def evaluate(model, loader, Ks, device, user_bs=256, item_chunk=4096, use_fp16=T
             for m in metric_names:
                 metrics_dict[k][m].append(batch_metrics[k][m])
 
-        del scores  # giải phóng
+        del scores  
 
-    # gộp trung bình
     for k in Ks:
         for m in metric_names:
             metrics_dict[k][m] = np.concatenate(metrics_dict[k][m]).mean()
@@ -73,7 +70,7 @@ def evaluate(model, loader, Ks, device, user_bs=256, item_chunk=4096, use_fp16=T
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     eval_time_s = max(ttime.perf_counter() - eval_t0, 1e-9)
-    return None, metrics_dict, eval_time_s  # không trả cf_scores để tiết kiệm RAM
+    return None, metrics_dict, eval_time_s  
 
 
 def train(args):
@@ -93,11 +90,11 @@ def train(args):
     model = KGNN_LS(
         args,
         n_user=data.n_users,
-        n_entity=data.n_entities,          # items + entities khác
+        n_entity=data.n_entities,          
         n_relation=data.n_relations,
-        adj_entity=data.adj_entity,        # shape [n_entity, K^1 + ...] như bạn đang dùng
+        adj_entity=data.adj_entity,        
         adj_relation=data.adj_relation,
-        user_pos_items=data.train_user_dict,  # dict u -> LongTensor(items)
+        user_pos_items=data.train_user_dict,  
         n_items=data.n_items,             
         user_pre_embed=(data.user_pre_embed if args.use_pretrain else None),
         item_pre_embed=(data.item_pre_embed if args.use_pretrain else None),
@@ -106,7 +103,6 @@ def train(args):
 
     logging.info(model)
 
-    # --- model stats: number of trainable params and approximate model size (MB) ---
     model_n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     model_param_bytes = sum(p.numel() * p.element_size() for p in model.parameters() if p.requires_grad)
     model_size_mb = model_param_bytes / (1024.0 * 1024.0)
@@ -119,7 +115,6 @@ def train(args):
     training_loss = {'epoch': [], 'cf_loss': [], 'kg_loss': [], 'total_loss': []}
     best_epoch = -1
 
-    # Overall trackers
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     train_gpu_peak_bytes = 0
@@ -154,22 +149,18 @@ def train(args):
         logging.info('CF Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Mean Loss {:.4f}'.format(
             epoch, n_cf_batch, time() - time0, cf_total_loss / max(n_cf_batch, 1)))
 
-        # no KG update
         training_loss['epoch'].append(epoch)
         cf_mean = cf_total_loss / max(n_cf_batch, 1)
         training_loss['cf_loss'].append(cf_mean)
         training_loss['kg_loss'].append(0.0)
         training_loss['total_loss'].append(cf_mean)
 
-        # updatemode=_att noop
         model(None, None, mode='update_att')
 
-        # snapshot training GPU peak up to now
         if torch.cuda.is_available():
             train_gpu_peak_bytes = max(train_gpu_peak_bytes, torch.cuda.max_memory_allocated())
 
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
-            # snapshot training peak and reset to isolate eval
             if torch.cuda.is_available():
                 train_gpu_peak_bytes = max(train_gpu_peak_bytes, torch.cuda.max_memory_allocated())
                 torch.cuda.reset_peak_memory_stats()
@@ -198,10 +189,8 @@ def train(args):
             if should_stop:
                 break
 
-    # save loss
     pd.DataFrame(training_loss).to_csv(os.path.join(args.save_dir, "training_loss.csv"), index=False)
 
-    # save metrics
     records = []
     for i, ep in enumerate(epoch_list):
         row = {"epoch_idx": ep}
@@ -213,7 +202,6 @@ def train(args):
     metrics_df = pd.DataFrame(records)
     metrics_df.to_csv(os.path.join(args.save_dir, "metrics.csv"), index=False)
 
-    # best metrics
     if best_epoch == -1 and len(metrics_df) > 0 and f"recall@{k_min}" in metrics_df.columns:
         recalls = metrics_df[f"recall@{k_min}"].to_numpy()
         best_idx = int(np.nanargmax(recalls))
@@ -229,7 +217,6 @@ def train(args):
             bm.get(f"ndcg@{k_min}", float('nan')),      bm.get(f"ndcg@{k_max}", float('nan')),
         ))
 
-    # Overall summary
     total_wall_s = ttime.perf_counter() - overall_t0
     total_train_s = max(total_wall_s - eval_time_acc, 0.0)
     train_gpu_peak_mb = (train_gpu_peak_bytes / 1024 / 1024) if torch.cuda.is_available() else 0.0

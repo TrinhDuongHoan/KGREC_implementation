@@ -20,16 +20,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# ====== models & loaders ======
 from models.CKAN import CKAN        
 from loaders.ckan_loader import DataLoaderCKAN  
-# ====== utils ======
+
 from utils.log_helper import *
 from utils.metrics import *
 from utils.model_helper import *
 
-
-# -------- helper: tile triple-set theo batch --------
 def tile_triple_set(ts, n):
     
     H, R, T = ts
@@ -49,7 +46,6 @@ def evaluate(model, loader, Ks, device, item_bs=4096, user_bs=512, eval_user_lim
     train_user_dict = loader.train_user_dict
     test_user_dict  = loader.test_user_dict
 
-    # ----- 1) Precompute item embeddings -----
     n_items = loader.n_items
     all_items = torch.arange(n_items, dtype=torch.long, device=device)
     item_embs = []
@@ -59,16 +55,15 @@ def evaluate(model, loader, Ks, device, item_bs=4096, user_bs=512, eval_user_lim
             e = min(s+item_bs, n_items)
             items = all_items[s:e]
             i_ts = loader.build_item_triple_set(items)
-            # user dummy: repeat 1 id, rồi tile triple-set tương ứng
+
             dummy_u = torch.full((items.size(0),), loader.n_entities, dtype=torch.long, device=device)
-            u_ts = loader.build_user_triple_set(dummy_u[:1])              # [1,T] mỗi level
+            u_ts = loader.build_user_triple_set(dummy_u[:1])              # [1,T] 
             u_ts = tile_triple_set(u_ts, items.size(0))                   # [B,T]
             embs = model.core._agg_embeddings(items, u_ts, i_ts)[1]       # lấy e_v
             item_embs.append(embs.detach())
             pbar.update(1)
     item_embs = torch.cat(item_embs, dim=0)                               # [I, D_eff]
 
-    # ----- 2) Precompute user embeddings -----
     user_ids = list(test_user_dict.keys())
     if eval_user_limit is not None:
         user_ids = user_ids[:eval_user_limit]
@@ -82,13 +77,11 @@ def evaluate(model, loader, Ks, device, item_bs=4096, user_bs=512, eval_user_lim
             e = min(s+user_bs, len(user_ids))
             u_batch = torch.tensor(user_ids[s:e], dtype=torch.long, device=device)
 
-            # user triple-set và embedding
             u_ts = loader.build_user_triple_set(u_batch)
             e_u, _ = model.core._agg_embeddings(all_items[:1], u_ts, loader.build_item_triple_set(all_items[:1]))  # chỉ cần e_u
-            # điểm = e_u @ item_embs^T
+
             scores = (e_u @ item_embs.t())                                  # [B, I]
 
-            # metrics
             batch_metrics = calc_metrics_at_k(
                 scores.cpu(),
                 train_user_dict,
@@ -135,10 +128,8 @@ def train(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # loader
     data = DataLoaderCKAN(args, logging)
 
-    # model
     model = CKAN(
         n_users=data.n_users,
         n_entity=data.n_users_entities,
@@ -150,7 +141,6 @@ def train(args):
     ).to(device)
     logging.info(model)
 
-    # --- model stats: number of trainable params and approximate model size (MB) ---
     model_n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     model_param_bytes = sum(p.numel() * p.element_size() for p in model.parameters() if p.requires_grad)
     model_size_mb = model_param_bytes / (1024.0 * 1024.0)
@@ -167,7 +157,6 @@ def train(args):
 
     best_epoch, best_recall = -1, 0
 
-    # Overall trackers for totals
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     train_gpu_peak_bytes = 0
@@ -179,7 +168,6 @@ def train(args):
         t0 = time()
         model.train()
 
-        # ---- CF training ----
         cf_total_loss = 0.0
         n_cf_batch = data.n_cf_train // data.cf_batch_size + 1
 
@@ -189,7 +177,6 @@ def train(args):
             pos_items = pos_items.to(device)
             neg_items = neg_items.to(device)
 
-            # triple-sets
             u_ts_pos = data.build_user_triple_set(users)
             i_ts_pos = data.build_item_triple_set(pos_items)
             u_ts_neg = data.build_user_triple_set(users)
@@ -217,13 +204,10 @@ def train(args):
 
         logging.info('Epoch {:04d} | Total Time {:.1f}s'.format(epoch, time() - t0))
 
-        # snapshot training GPU peak up to this point
         if torch.cuda.is_available():
             train_gpu_peak_bytes = max(train_gpu_peak_bytes, torch.cuda.max_memory_allocated())
 
-        # ---- Evaluate ----
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
-            # snapshot training peak before eval and reset to avoid pollution
             if torch.cuda.is_available():
                 train_gpu_peak_bytes = max(train_gpu_peak_bytes, torch.cuda.max_memory_allocated())
                 torch.cuda.reset_peak_memory_stats()
@@ -255,10 +239,8 @@ def train(args):
                 logging.info('Save model on epoch {:04d}!'.format(epoch))
                 best_epoch = epoch
 
-    # ---- save training loss ----
     pd.DataFrame(training_loss).to_csv(os.path.join(args.save_dir, "training_loss.csv"), index=False)
 
-    # ---- save metrics CSV ----
     metrics_records = []
     for i, ep in enumerate(epoch_list):
         row = {"epoch_idx": ep}
@@ -270,7 +252,6 @@ def train(args):
     metrics_df = pd.DataFrame(metrics_records)
     metrics_df.to_csv(os.path.join(args.save_dir, "metrics.csv"), index=False)
 
-    # ---- print best ----
     if best_epoch != -1 and not metrics_df.empty:
         best_metrics = metrics_df.loc[metrics_df["epoch_idx"] == best_epoch].iloc[0].to_dict()
         logging.info(
@@ -284,7 +265,6 @@ def train(args):
             )
         )
 
-    # Write overall runtime summary
     total_wall_s = ttime.perf_counter() - overall_t0
     total_train_s = max(total_wall_s - eval_time_acc, 0.0)
     train_gpu_peak_mb = (train_gpu_peak_bytes / 1024 / 1024) if torch.cuda.is_available() else 0.0

@@ -131,10 +131,8 @@ def train(args):
     logging_config(folder=args.save_dir, name='log{:d}'.format(log_save_id), no_console=False)
     logging.info(args)
 
-    # ----- Load data -----
     data = DataLoaderKGAT(args, logging)
 
-    # ----- Pretrain -----
     pretrain_data = None
     if args.use_pretrain == 1:
         pretrain_data = {
@@ -161,7 +159,6 @@ def train(args):
         'all_v_list': all_v_list,
     }
 
-    # ----- Init model -----
     model = KGAT(data_config, pretrain_data, args)
     model.to(device)
     model.device = device
@@ -196,9 +193,7 @@ def train(args):
     eval_time_acc = 0.0
     last_eval_time_s = 0.0
 
-    # ====== Training loop ======
     for epoch in range(1, args.n_epoch + 1):
-        # ---------- Phase I: CF ----------
         time1 = time()
         cf_total_loss = 0.0
         n_cf_batch = data.n_cf_train // data.batch_size + 1
@@ -239,7 +234,6 @@ def train(args):
             f'Total Time {time() - time1:.1f}s | Mean Loss {cf_total_loss / max(1, n_cf_batch):.4f}'
         )
 
-        # ---------- Phase II: KG ----------
         time3 = time()
         kg_total_loss = 0.0
         n_kg_batch = data.n_kg_train // args.batch_size_kg + 1
@@ -291,7 +285,6 @@ def train(args):
         training_loss['kg_loss'].append(kg_total_loss / max(1, n_kg_batch))
         training_loss['total_loss'].append(training_loss['cf_loss'][-1] + training_loss['kg_loss'][-1])
 
-        # ---------- Update attentive A ----------
         if epoch % update_A_every == 0:
             t5 = time()
             model.update_attentive_A(None)
@@ -304,7 +297,6 @@ def train(args):
                 epoch, update_A_every
             )
 
-        # ---------- Evaluate ----------
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
             if use_cuda:
                 torch.cuda.reset_peak_memory_stats()
@@ -340,11 +332,9 @@ def train(args):
                 logging.info('Save model on epoch {:04d}!'.format(epoch))
                 best_epoch = epoch
 
-    # ----- Save loss -----
     training_loss_df = pd.DataFrame(training_loss)
     training_loss_df.to_csv(os.path.join(args.save_dir, "training_loss.csv"), index=False)
 
-    # ----- Save metrics history -----
     metrics_records = []
     for i, ep in enumerate(epoch_list):
         row = {"epoch_idx": ep}
@@ -358,7 +348,6 @@ def train(args):
     csv_path = os.path.join(args.save_dir, "kgat_metrics.csv")
     metrics_df.to_csv(csv_path, index=False)
 
-    # ----- Best line -----
     if len(metrics_df) > 0 and 'best_epoch' in locals() and best_epoch in metrics_df["epoch_idx"].values:
         best_metrics = metrics_df.loc[metrics_df["epoch_idx"] == best_epoch].iloc[0].to_dict()
         logging.info(
@@ -375,7 +364,6 @@ def train(args):
     else:
         logging.info("No best epoch recorded; metrics history may be empty.")
 
-    # ----- Runtime summary -----
     total_wall_s = ttime.perf_counter() - overall_t0
     total_train_s = max(total_wall_s - eval_time_acc, 0.0)
     train_gpu_peak_mb = (train_gpu_peak_bytes / 1024 / 1024) if use_cuda else 0.0

@@ -46,17 +46,11 @@ class LabelAggregator(nn.Module):
 
 
 class KGNN_LS(nn.Module):
-    """
-    Giữ nguyên kiến trúc. Thêm:
-      - use_pretrain: nạp user_pre_embed và item_pre_embed (items ở đầu entity_emb).
-      - Chuẩn hoá user_pos_items sang LongTensor để tránh lỗi .to(...)
-      - sum_aggs, label_agg, item_cache, BPR helper.
-    """
     def __init__(self, args, n_user, n_entity, n_relation,
                  adj_entity, adj_relation, user_pos_items,
                  n_items=None, user_pre_embed=None, item_pre_embed=None, use_pretrain=0):
         super().__init__()
-        # --- hyper ---
+
         self.n_iter = int(args.n_iter)
         self.batch_size = int(getattr(args, "test_batch_size", getattr(args, "batch_size", 1024)))
         self.n_neighbor = int(args.neighbor_sample_size)
@@ -65,33 +59,28 @@ class KGNN_LS(nn.Module):
         self.lr = float(args.lr)
         self.ls_weight = float(args.ls_weight)
 
-        # --- pretrain meta ---
         self.n_items = int(n_items) if n_items is not None else None
         self.use_pretrain = int(use_pretrain)
 
-        # --- buffers & dữ liệu ---
         self.register_buffer("adj_entity", torch.as_tensor(adj_entity, dtype=torch.long))
         self.register_buffer("adj_relation", torch.as_tensor(adj_relation, dtype=torch.long))
         self.register_buffer("_empty_pos", torch.empty(0, dtype=torch.long))
 
-        # chuẩn hoá dict u->items về LongTensor CPU
         if isinstance(user_pos_items, dict):
             norm = {}
             for k, v in user_pos_items.items():
-                norm[int(k)] = torch.as_tensor(v, dtype=torch.long)  # CPU tensor
+                norm[int(k)] = torch.as_tensor(v, dtype=torch.long)  
             self.user_pos_items = norm
         else:
             self.user_pos_items = user_pos_items
 
-        # --- embeddings ---
         self.user_emb = nn.Embedding(n_user, self.dim)
-        self.entity_emb = nn.Embedding(n_entity, self.dim)   # items phải nằm [0..n_items-1]
+        self.entity_emb = nn.Embedding(n_entity, self.dim)  
         self.relation_emb = nn.Embedding(n_relation, self.dim)
         nn.init.xavier_uniform_(self.user_emb.weight)
         nn.init.xavier_uniform_(self.entity_emb.weight)
         nn.init.xavier_uniform_(self.relation_emb.weight)
 
-        # --- nạp pretrain nếu có ---
         if self.use_pretrain:
             with torch.no_grad():
                 if user_pre_embed is not None:
@@ -99,24 +88,17 @@ class KGNN_LS(nn.Module):
                     assert up.shape == self.user_emb.weight.shape, f"user_pre_embed {up.shape} != {self.user_emb.weight.shape}"
                     self.user_emb.weight.copy_(up)
                 if item_pre_embed is not None:
-                    assert self.n_items is not None, "Cần n_items để map item vào entity_emb."
                     ip = torch.as_tensor(item_pre_embed, dtype=self.entity_emb.weight.dtype, device=self.entity_emb.weight.device)
-                    assert ip.shape == (self.n_items, self.dim), f"item_pre_embed {ip.shape} != ({self.n_items},{self.dim})"
                     self.entity_emb.weight[:self.n_items].copy_(ip)
 
-        # --- aggregators ---
-        assert self.n_iter >= 1, "n_iter phải >= 1"
         self.sum_aggs = nn.ModuleList([
             SumAggregator(self.batch_size, self.dim, dropout=0.0,
                           act=(torch.tanh if i == self.n_iter - 1 else F.relu))
             for i in range(self.n_iter)
         ])
         self.label_agg = LabelAggregator(self.batch_size, self.dim)
-
-        # --- misc ---
         self.item_cache = None
 
-    # --------- helpers ---------
     @staticmethod
     def _bpr(pos, neg):
         return -torch.log(torch.sigmoid(pos - neg) + 1e-12).mean()
@@ -133,7 +115,6 @@ class KGNN_LS(nn.Module):
             relations.append(neigh_r)
         return entities, relations
 
-    # --------- core ---------
     def _aggregate(self, user_emb, entities, relations):
         entity_vectors = [self.entity_emb(e) for e in entities]      # [B,K^hop,D]
         relation_vectors = [self.relation_emb(r) for r in relations] # [B,K^hop,D]
@@ -163,7 +144,7 @@ class KGNN_LS(nn.Module):
             init_rows, reset_rows = [], []
             for b in range(B):
                 u = int(user_ids[b].item())
-                pos = self.user_pos_items.get(u, self._empty_pos)     # CPU tensor
+                pos = self.user_pos_items.get(u, self._empty_pos)     
                 pos = pos.to(e.device)
                 row = torch.isin(e[b], pos)                           # [K^i] bool
                 init_rows.append(row.float())
@@ -207,7 +188,6 @@ class KGNN_LS(nn.Module):
         i = self._aggregate(u, e, r)                                  # [B,D]
         return (u * i).sum(dim=1)                                     # [B]
 
-    # --------- caching (eval) ---------
     @torch.no_grad()
     def build_item_cache(self, device, n_items=None, chunk=4096):
         self.item_cache = None
@@ -228,7 +208,6 @@ class KGNN_LS(nn.Module):
         u = self.user_emb(user_ids)                                   # [U,D]
         return u @ self.item_cache.t()                                # [U,I]
 
-    # --------- forward ---------
     def forward(self, a, b, mode='predict', **kwargs):
         if mode == 'predict':
             if self.item_cache is not None and kwargs.get("use_cache", True):
