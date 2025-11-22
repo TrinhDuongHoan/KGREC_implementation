@@ -1,7 +1,7 @@
 seed: 2025
 data_name: yelp2018
 data_dir: datasets/
-use_attention: 1
+use_attention: 0
 use_pretrain: 1
 pretrain_embedding_dir: datasets/
 pretrain_model_path: trained_model/model.pth
