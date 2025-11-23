@@ -1,0 +1,19 @@
+seed: 2025
+use_gpu: 1
+data_name: amazon-book
+data_dir: datasets
+save_dir: trained_model/CBFM/amazon-book
+eval_user_limit: 1000
+context_field_dims: []
+context_path: null
+embed_dim: 64
+lr: 0.001
+l2_reg: 0.0001
+interaction_dropout: 0.0
+cf_batch_size: 1024
+test_batch_size: 10000
+cf_print_every: 10
+n_epoch: 50
+evaluate_every: 5
+stopping_steps: 10
+Ks: [20, 40, 60, 80, 100]
