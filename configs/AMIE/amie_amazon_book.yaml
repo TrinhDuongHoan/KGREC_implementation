@@ -16,7 +16,7 @@ lr: 0.001
 cf_batch_size: 256
 test_batch_size: 256
 cf_print_every: 50
-n_epoch: 1
-evaluate_every: 1
+n_epoch: 50
+evaluate_every: 5
 stopping_steps: 10
 Ks: [20, 40, 60, 80, 100]
