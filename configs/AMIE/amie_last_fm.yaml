@@ -1,0 +1,22 @@
+seed: 2025
+use_gpu: 1
+data_name: last-fm
+data_dir: datasets
+use_pretrain: 0
+pretrain_embedding_dir: datasets
+save_dir: trained_model/AMIE/last-fm
+eval_user_limit: 1000
+embed_dim: 64
+n_interest: 4
+interest_dim: 64
+interest_temperature: 1.0
+interest_dropout: 0.1
+cf_l2loss_lambda: 0.0001
+lr: 0.001
+cf_batch_size: 512
+test_batch_size: 10000
+cf_print_every: 50
+n_epoch: 40
+evaluate_every: 5
+stopping_steps: 10
+Ks: [20, 40, 60, 80, 100]
