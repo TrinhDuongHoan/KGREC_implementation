@@ -34,6 +34,7 @@ class AMIE(nn.Module):
 		self.dropout_rate = float(getattr(args, "interest_dropout", 0.0))
 		self.cf_l2loss_lambda = float(getattr(args, "cf_l2loss_lambda", 1e-4))
 		self.use_pretrain = int(getattr(args, "use_pretrain", 0))
+		self.predict_chunk_size = int(getattr(args, "predict_chunk_size", 2048))
 
 		self.user_embedding = nn.Embedding(n_users, self.embed_dim)
 		self.item_embedding = nn.Embedding(n_items, self.interest_dim)
@@ -116,16 +117,16 @@ class AMIE(nn.Module):
 
 	def calc_score(self, user_ids: torch.Tensor, item_ids: torch.Tensor) -> torch.Tensor:
 		user_embed, interests, prior = self._user_interests(user_ids)
-		item_embed = self.item_embedding(item_ids)  # (n_items, dim)
-
-		# Interest-to-item affinities drive mixture weights per item.
-		scores = torch.matmul(interests, item_embed.t()) / self.temperature  # (batch, K, n_items)
-		scores = scores + torch.log(prior.clamp_min(1e-8)).unsqueeze(-1)
-		weights = torch.softmax(scores, dim=1)
-
-		mixed_user = torch.sum(weights.unsqueeze(-1) * interests.unsqueeze(2), dim=1)  # (batch, n_items, dim)
-		final_scores = torch.sum(mixed_user * item_embed.unsqueeze(0), dim=2)
-		return final_scores
+		item_embed = self.item_embedding(item_ids)
+		prior_log = torch.log(prior.clamp_min(1e-8)).unsqueeze(-1)
+		chunk_size = max(1, self.predict_chunk_size)
+		score_chunks = []
+		for chunk in item_embed.split(chunk_size, dim=0):
+			base = torch.matmul(interests, chunk.t())
+			logits = base / self.temperature + prior_log
+			weights = torch.softmax(logits, dim=1)
+			score_chunks.append(torch.sum(weights * base, dim=1))
+		return torch.cat(score_chunks, dim=1)
 
 	def forward(self, *inputs: torch.Tensor, mode: str):
 		if mode == "train_cf":

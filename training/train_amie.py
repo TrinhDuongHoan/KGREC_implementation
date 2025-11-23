@@ -44,7 +44,7 @@ def evaluate(model, dataloader, Ks, device):
 	metrics_raw = calc_metrics_at_k(scores, train_user_dict, test_user_dict, np.array(user_ids), item_ids.cpu().numpy(), Ks)
 	metric_names = ['precision','recall','f1','ndcg']
 	metrics_dict = {k: {m: metrics_raw[k][m].mean() for m in metric_names} for k in Ks}
-	return metrics_dict, 0.0  # evaluation time not tracked precisely here
+	return metrics_dict, 0.0  
 
 
 def train(args):
