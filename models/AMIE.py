@@ -1,12 +1,3 @@
-"""Attentive Multi-Interest Embedding (AMIE) model.
-
-The model learns a base user representation and projects it into several
-interest vectors. Each item activates these interests and a softmax mixture
-produces the user representation that should interact with the item. The loss
-is BPR-style on the resulting logits. Prediction returns a dense
-user-by-item score matrix for ranking.
-"""
-
 from __future__ import annotations
 
 import torch
