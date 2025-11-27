@@ -1,8 +1,6 @@
 # KGREC Implementation
 
-This is source code of paper : "KGRec: a knowledge graph attention-based model for
-
-recommender system"
+This is source code of paper : "KGRec: a knowledge graph attention-based model for recommender system"
 
 ## Highlights
 - Unified training interface across multiple recommenders with shared utilities for logging, evaluation, and checkpointing.
@@ -89,3 +87,4 @@ python training/<train_script>.py --configs configs/<Model>/<config>.yaml
 	```
 
 Logs, checkpoints, metrics CSVs, and runtime summaries are saved under the `save_dir` declared in each config.
+
